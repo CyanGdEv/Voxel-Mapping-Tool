@@ -45,7 +45,7 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(inputs, /^\s{6}park:/m);
   assert.doesNotMatch(inputs, /planning_manifest|strict:/);
   assert.match(workflow, /--park "\$PARK_ID"/);
-  assert.match(workflow, /"\$PARK_ID" == "alton-towers-resort"[\s\S]*--max-planning-applications 6/);
+  assert.doesNotMatch(workflow, /--max-planning-applications 6/);
   assert.match(workflow, /--strict/);
   assert.doesNotMatch(workflow, /--planning-manifest/);
   assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
