@@ -12,7 +12,7 @@
   "planningDiscovery": {
     "portalType": "northgate",
     "searchUrl": "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
-    "allowedDocumentHosts": ["planning.runnymede.gov.uk"],
+    "allowedDocumentHosts": ["planning.runnymede.gov.uk", "docs.runnymede.gov.uk"],
     "seedApplicationUrls": [
       "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?DAURI=PLANNING&PARAM0=322455&TYPE=PL%2FPlanningPK.xml&XSLT=%2FNorthgate%2FPlanningExplorer%2FSiteFiles%2FSkins%2FRunnymede_AA%2Fxslt%2FPL%2FPLDetails.xslt",
       "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?DAURI=PLANNING&PARAM0=348466&TYPE=PL%2FPlanningPK.xml&XSLT=%2FPlanningPK.xml",
