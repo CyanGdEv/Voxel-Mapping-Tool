@@ -8,7 +8,7 @@ import { buildPark } from "./lib/pipeline.mjs";
 import { applyParkProfile, listParkProfiles, loadParkProfile } from "./lib/park-profile.mjs";
 import { extractRasterPlanningPage } from "./lib/planning-raster-extraction.mjs";
 
-const HELP = `Voxel Mapping Tool 0.1.0 — evidence-first 1:1 theme-park-to-Bedrock compiler
+const HELP = `Voxel Mapping Tool 0.2.0 — automatic evidence-first 1:1 theme-park-to-Bedrock compiler
 
 Usage
   voxel-map build --park PARK [options]
@@ -23,11 +23,14 @@ Fast offline example
 Live public-data build
   voxel-map build \\
     --park alton-towers-resort \\
-    --planning-manifest evidence/alton-towers.json \\
     --contact "you@example.com" \\
     --planning-world-authority planning-only \\
     --strict \\
     --out out/alton-towers
+
+  Selecting --park automatically searches the national PlanIt spatial index and
+  the park's official council register, downloads relevant planning drawings,
+  extracts/georeferences confidence-gated geometry, and builds the world.
 
 Core options
   --park ID                        Built-in park profile; run "voxel-map parks"
@@ -38,6 +41,14 @@ Core options
   --public-data FILE               Licensed public/park GIS GeoJSON; repeatable
   --planning FILE                  Trusted planning GeoJSON (fixture/manual use); repeatable
   --planning-manifest FILE_OR_URL  Planning document/evidence manifest; repeatable
+  --no-auto-planning              Disable automatic discovery when using expert/manual inputs
+  --planit-url URL                Replaceable PlanIt application-index endpoint
+  --max-planning-applications 250 Bounded automatic application-search limit
+  --max-planning-documents 160    Bounded relevant-document download limit
+  --max-planning-pages-per-document 20
+                                    Bounded drawing-page extraction limit
+  --planning-georef-min-confidence .72
+                                    Minimum automatic drawing alignment confidence
   --planning-world-authority planning-only|fixture
                                     OSM is registration-only by default; fixture is test-only
   --source-fusion-tolerance-m 3    Overture duplicate/overlap comparison tolerance
@@ -266,6 +277,7 @@ async function main() {
       id: profile.id,
       name: profile.name,
       planningAuthority: profile.planningAuthority.name,
+      planningDiscovery: profile.planningDiscovery.portalType,
       bbox: profile.bbox
     })), null, 2));
     return;

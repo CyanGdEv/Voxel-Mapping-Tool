@@ -107,6 +107,16 @@ export async function buildPark(options = {}, progress = () => {}) {
     path.join(outputDir, "planning-sources.json"),
     compactPlanningEvidence(sources.planning)
   );
+  const planningDiscoveryPath = sources.planning?.automatic
+    ? await writeJson(path.join(outputDir, "planning-discovery.json"), {
+        schemaVersion: 1,
+        ...sources.planning.discovery,
+        applications: compactPlanningEvidence(sources.planning).applications,
+        documents: sources.planning.documents,
+        failures: sources.planning.failures || [],
+        warnings: sources.planning.warnings || []
+      })
+    : null;
   const sourceAuthorityPath = await writeJson(path.join(outputDir, "source-authority.json"), {
     schemaVersion: 1,
     mode: options.planningWorldAuthority || "planning-only",
@@ -206,6 +216,7 @@ export async function buildPark(options = {}, progress = () => {}) {
       fidelity: fidelityPath,
       reconstructionGraph: reconstructionGraphPath,
       planningSources: planningSourcesPath,
+      planningDiscovery: planningDiscoveryPath,
       sourceAuthority: sourceAuthorityPath,
       orthophotoEvidence: orthophotoEvidencePath,
       orthophotoQa: orthophotoQaPath,

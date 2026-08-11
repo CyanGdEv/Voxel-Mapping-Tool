@@ -1,6 +1,6 @@
 {
   "name": "voxel-mapping-tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Evidence-first 1:1 Minecraft Bedrock theme-park reconstruction compiler",
   "type": "module",
   "bin": {
@@ -11,6 +11,7 @@
     "test": "node --test",
     "ci": "npm test && npm run build:fixture && npm run validate:fixture",
     "parks": "node src/cli.mjs parks",
+    "discover:fixture": "node --test test/planning-discovery.test.mjs",
     "build:fixture": "node src/cli.mjs build --park-name \"Fixture Park\" --osm test/fixtures/mini-park.overpass.json --planning test/fixtures/planning-authority.geojson --bbox 51.0000,-0.0020,51.0020,0.0020 --elevation none --planning-world-authority planning-only --accuracy-mode verified --buildings markers --no-addon --no-preview --out out/fixture",
     "build:orthophoto-demo": "node scripts/build-orthophoto-demo.mjs",
     "build:terrain-demo": "node scripts/build-terrain-detail-demo.mjs",

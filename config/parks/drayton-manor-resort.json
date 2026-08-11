@@ -9,6 +9,11 @@
     "officialPortal": "https://planning.lichfielddc.gov.uk/online-applications/search.do?action=simple",
     "searchTerms": ["Drayton Manor Park", "Drayton Bassett", "B78 3TW"]
   },
+  "planningDiscovery": {
+    "portalType": "idox",
+    "searchUrl": "https://planning.lichfielddc.gov.uk/online-applications/search.do?action=simple",
+    "allowedDocumentHosts": ["planning.lichfielddc.gov.uk"]
+  },
   "defaults": {
     "elevation": "ea-lidar",
     "englandOpenData": true,

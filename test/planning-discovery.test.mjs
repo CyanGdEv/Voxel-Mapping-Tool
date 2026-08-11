@@ -1,0 +1,252 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import {
+  autoGeoreferencePlanningPage,
+  corroborateAutomaticPlanningCollection,
+  detectPlanningScales
+} from "../src/lib/planning-auto-georeference.mjs";
+import { discoverPlanningApplications } from "../src/lib/planning-discovery.mjs";
+import {
+  classifyPlanningDocument,
+  extractApplicationLinks,
+  extractDocumentLinks,
+  parsePlanningApplicationPage
+} from "../src/lib/planning-portal-html.mjs";
+import { classifyComprehensivePlanningLabel } from "../src/lib/planning-comprehensive-semantics.mjs";
+import { parseArgs } from "../src/lib/args.mjs";
+import { acquirePlanningEvidence } from "../src/lib/planning-manifest.mjs";
+
+const profile = {
+  id: "fixture-park",
+  name: "Fixture Park",
+  bbox: { south: 51, west: -0.01, north: 51.02, east: 0.01 },
+  planningAuthority: {
+    name: "Fixture Council",
+    officialPortal: "https://planning.example/search",
+    searchTerms: ["Fixture Park", "FP1 1AA"]
+  },
+  planningDiscovery: {
+    portalType: "idox",
+    searchUrl: "https://planning.example/online-applications/search.do?action=simple",
+    allowedDocumentHosts: ["planning.example"]
+  }
+};
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("production GitHub Action requires only a park selection", async () => {
+  const workflow = await readFile(path.join(repositoryRoot, ".github/workflows/generate-themepark.yml"), "utf8");
+  const inputs = workflow.match(/inputs:\n([\s\S]*?)\n\npermissions:/)?.[1] || "";
+  assert.match(inputs, /^\s{6}park:/m);
+  assert.doesNotMatch(inputs, /planning_manifest|strict:/);
+  assert.match(workflow, /--park "\$PARK_ID"/);
+  assert.match(workflow, /--strict/);
+  assert.doesNotMatch(workflow, /--planning-manifest/);
+});
+
+test("automatic planning controls are bounded and can be explicitly disabled for expert inputs", () => {
+  const parsed = parseArgs([
+    "build", "--park", "thorpe-park", "--max-planning-applications", "300",
+    "--max-planning-documents", "120", "--max-planning-pages-per-document", "16",
+    "--planning-georef-min-confidence", "0.8", "--no-auto-planning"
+  ]).options;
+  assert.equal(parsed.maxPlanningApplications, 300);
+  assert.equal(parsed.maxPlanningDocuments, 120);
+  assert.equal(parsed.maxPlanningPagesPerDocument, 16);
+  assert.equal(parsed.planningGeorefMinConfidence, 0.8);
+  assert.equal(parsed.noAutoPlanning, true);
+});
+
+test("official portal HTML adapters recover applications, metadata and ranked drawing links", () => {
+  const html = `
+    <table>
+      <tr><th>Application number</th><td>25/0042/FUL</td></tr>
+      <tr><th>Site address</th><td>Fixture Park FP1 1AA</td></tr>
+      <tr><th>Proposal</th><td>Existing roller coaster support replacement</td></tr>
+      <tr><th>Decision</th><td>Approved</td></tr>
+      <tr><th>Decision date</th><td>10/07/2025</td></tr>
+    </table>
+    <a href="applicationDetails.do?activeTab=summary&keyVal=ABC">Application</a>
+    <a href="applicationDetails.do?activeTab=documents&keyVal=ABC">Documents</a>
+    <a href="download/approved-ride-layout.pdf">Approved Ride Layout and Elevations</a>
+    <a href="download/application-form.pdf">Application Form</a>`;
+  const base = "https://planning.example/online-applications/search.do";
+  assert.equal(extractApplicationLinks(html, base).length, 2);
+  const documents = extractDocumentLinks(html, base, ["planning.example"]);
+  assert.equal(documents[0].role, "ride-layout-and-structure");
+  assert.equal(documents[0].relevant, true);
+  assert.equal(documents.some((item) => /application-form/.test(item.url)), true);
+  assert.equal(classifyPlanningDocument("Application Form", "form.pdf").relevant, false);
+  const parsed = parsePlanningApplicationPage(html, base);
+  assert.equal(parsed.reference, "25/0042/FUL");
+  assert.match(parsed.address, /Fixture Park/);
+  assert.equal(parsed.decisionDate, "2025-07-10");
+});
+
+test("automatic discovery merges PlanIt spatial results with official portal search and removes unrelated records", async () => {
+  const planit = {
+    type: "FeatureCollection",
+    total: 2,
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [0, 51.01] },
+        properties: {
+          reference: "25/0042/FUL",
+          address: "Fixture Park FP1 1AA",
+          description: "Existing roller coaster support replacement",
+          decision: "Approved",
+          source_url: "https://planning.example/online-applications/applicationDetails.do?keyVal=ABC"
+        }
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [0.009, 51.019] },
+        properties: {
+          reference: "25/9999/HOU",
+          address: "Unrelated Cottage",
+          description: "Rear house extension",
+          decision: "Approved"
+        }
+      }
+    ]
+  };
+  const result = await discoverPlanningApplications(profile, { maxPlanningApplications: 20 }, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => planit,
+    fetchText: async () => '<a href="applicationDetails.do?activeTab=summary&keyVal=ABC">Fixture Park application</a>'
+  });
+  assert.equal(result.applications.length, 1);
+  assert.equal(result.applications[0].reference, "25/0042/FUL");
+  assert.equal(result.summary.mode, "automatic-park-selection");
+  assert.equal(result.failures.length, 0);
+});
+
+test("blocked discovery services produce diagnostics instead of silently substituting map geometry", async () => {
+  const result = await discoverPlanningApplications(profile, {}, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => { throw new Error("PlanIt rate limited"); },
+    fetchText: async () => { throw new Error("Council access denied"); }
+  });
+  assert.equal(result.applications.length, 0);
+  assert.equal(result.failures.length, 2);
+  assert.match(result.failures.map((item) => item.error).join(" "), /rate limited|access denied/);
+});
+
+test("official archive seeds remain discoverable when a legacy portal has no machine-search endpoint", async () => {
+  const legacyProfile = {
+    ...profile,
+    planningDiscovery: {
+      portalType: "legacy-idox",
+      searchUrl: "https://planning.example/legacy/ApplicationSearchServlet",
+      allowedDocumentHosts: ["planning.example"],
+      seedApplicationUrls: ["https://planning.example/legacy/ApplicationSearchServlet?PKID=42"]
+    }
+  };
+  const result = await discoverPlanningApplications(legacyProfile, {}, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => { throw new Error("index unavailable"); }
+  });
+  assert.equal(result.applications.length, 1);
+  assert.match(result.applications[0].sourceUrl, /PKID=42/);
+  assert.equal(result.applications[0].discoveryProvider, "park-profile-official-seed");
+});
+
+test("planning acquisition automatically invokes discovery when a supported park has no manual manifest", async () => {
+  const planit = {
+    type: "FeatureCollection",
+    total: 1,
+    features: [{
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [0, 51.01] },
+      properties: {
+        reference: "25/0042/FUL",
+        address: "Fixture Park FP1 1AA",
+        description: "Existing ride structure",
+        app_state: "Permitted",
+        url: "https://planning.example/online-applications/applicationDetails.do?keyVal=ABC"
+      }
+    }]
+  };
+  const result = await acquirePlanningEvidence({ parkProfile: profile }, {
+    bbox: profile.bbox,
+    center: { lat: 51.01, lon: 0 },
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => planit,
+    fetchText: async (url) => url.includes("search.do")
+      ? ""
+      : "<table><tr><th>Application number</th><td>25/0042/FUL</td></tr></table>"
+  });
+  assert.equal(result.automatic, true);
+  assert.equal(result.applications.length, 1);
+  assert.equal(result.status, "applications-found-no-documents");
+  assert.equal(result.featureCount, 0);
+});
+
+test("drawing scale, red-line alignment and semantic extraction produce planning-authoritative GeoJSON", () => {
+  const svg = `<svg width="1000" height="1000" viewBox="0 0 1000 1000">
+    <polygon points="100,100 900,100 900,900 100,900" stroke="rgb(220,20,20)" fill="none" />
+    <polygon points="250,250 450,250 450,450 250,450" stroke="rgb(30,30,30)" fill="none" />
+    <line x1="250" y1="720" x2="750" y2="720" stroke="rgb(20,20,20)" />
+  </svg>`;
+  const anchors = [
+    anchor("Existing station building FFL 112.4", 350, 350),
+    anchor("Existing roller coaster track alignment", 500, 720)
+  ];
+  const result = autoGeoreferencePlanningPage({
+    svg,
+    semantic: { anchors, rawLines: [{ text: "Scale 1:500" }] },
+    application: {
+      reference: "25/0042/FUL",
+      geometry: { type: "Point", coordinates: [-0.002, 51.01] },
+      locationConfidence: 0.95
+    },
+    document: { id: "approved-layout", title: "Existing as-built layout" },
+    profile,
+    minimumConfidence: 0.7
+  });
+  assert.equal(detectPlanningScales("Scale 1:500 at A1")[0].denominator, 500);
+  assert.equal(result.status, "geometry-ready");
+  assert.equal(result.origin.method, "red-line-boundary");
+  assert.ok(result.collection.features.some((feature) => feature.properties.kind === "building"));
+  assert.ok(result.collection.features.some((feature) => feature.properties.kind === "ride_track"));
+  assert.ok(result.collection.features.every((feature) => feature.properties.planning_authoritative));
+  assert.ok(result.collection.features.every((feature) => feature.properties.planning_georeference_confidence >= 0.7));
+});
+
+test("automatic world eligibility requires an accepted decision plus as-built/current-state evidence", () => {
+  const collection = {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [0, 51] },
+      properties: { kind: "building", planning_authoritative: true }
+    }]
+  };
+  const eligible = corroborateAutomaticPlanningCollection(collection, {
+    status: "Approved and completed",
+    proposal: "Existing as-built station building"
+  });
+  assert.equal(eligible.worldEligible, true);
+  const proposedOnly = corroborateAutomaticPlanningCollection(collection, {
+    status: "Approved",
+    proposal: "Proposed station building"
+  });
+  assert.equal(proposedOnly.worldEligible, false);
+});
+
+function anchor(text, cx, cy) {
+  const semantic = classifyComprehensivePlanningLabel(text);
+  assert.ok(semantic, `fixture text must classify: ${text}`);
+  return {
+    text, cx, cy, xMin: cx - 20, xMax: cx + 20, yMin: cy - 8, yMax: cy + 8,
+    ocrConfidence: 0.95, semantic
+  };
+}

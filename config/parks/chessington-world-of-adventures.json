@@ -9,6 +9,11 @@
     "officialPortal": "https://www.kingston.gov.uk/planning-and-building-control/planning-applications/search-or-comment",
     "searchTerms": ["Chessington World of Adventures", "Leatherhead Road", "KT9 2NE"]
   },
+  "planningDiscovery": {
+    "portalType": "idox",
+    "searchUrl": "https://publicaccess.kingston.gov.uk/online-applications/search.do?action=simple",
+    "allowedDocumentHosts": ["publicaccess.kingston.gov.uk"]
+  },
   "defaults": {
     "elevation": "ea-lidar",
     "englandOpenData": true,

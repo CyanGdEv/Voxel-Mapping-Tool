@@ -15,7 +15,7 @@ export async function acquireSources(options) {
   const cacheDir = path.resolve(options.cache || ".tpmap-cache");
   await ensureDir(cacheDir);
   const contact = options.contact || process.env.TPMAP_CONTACT;
-  const userAgent = contact ? `VoxelMappingTool/0.1.0 (${contact})` : "VoxelMappingTool/0.1.0";
+  const userAgent = contact ? `VoxelMappingTool/0.2.0 (${contact})` : "VoxelMappingTool/0.2.0";
 
   let bbox = options.bbox ? parseBbox(options.bbox) : undefined;
   let geocoder = null;
@@ -63,7 +63,7 @@ export async function acquireSources(options) {
     bbox, center, cacheDir, userAgent
   });
   const planning = await acquirePlanningEvidence(options, {
-    bbox, center, cacheDir, userAgent
+    bbox, center, cacheDir, userAgent, elevation, orthophoto, supplemental
   });
   return {
     parkName: options.parkName || geocoder?.displayName?.split(",")[0] || "Theme Park",

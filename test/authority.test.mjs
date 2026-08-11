@@ -28,6 +28,8 @@ test("ships profiles for the five requested UK parks", async () => {
     "thorpe-park"
   ]);
   assert.ok(profiles.every((profile) => profile.planningAuthority.officialPortal.startsWith("https://")));
+  assert.ok(profiles.every((profile) => profile.planningDiscovery.searchUrl.startsWith("https://")));
+  assert.ok(profiles.every((profile) => ["idox", "legacy-idox", "northgate"].includes(profile.planningDiscovery.portalType)));
 });
 
 test("planning manifests require and retain an explicit current-world eligibility decision", async () => {

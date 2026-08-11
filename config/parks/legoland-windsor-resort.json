@@ -9,6 +9,12 @@
     "officialPortal": "https://www.rbwm.gov.uk/planning-and-building-control/find-planning-application",
     "searchTerms": ["Legoland Windsor", "Winkfield Road", "SL4 4AY"]
   },
+  "planningDiscovery": {
+    "portalType": "idox",
+    "searchUrl": "https://publicaccess.rbwm.gov.uk/online-applications/search.do?action=simple",
+    "allowedDocumentHosts": ["publicaccess.rbwm.gov.uk"],
+    "accessNote": "The authority applies geographic and JavaScript access controls; PlanIt discovery and cached official URLs are used before the direct portal adapter."
+  },
   "defaults": {
     "elevation": "ea-lidar",
     "englandOpenData": true,

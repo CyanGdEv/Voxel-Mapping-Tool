@@ -52,6 +52,8 @@ ${componentRows}
 ${counts}
 
 - Park area queried: ${sources.areaKm2.toFixed(3)} km²
+- Planning acquisition: ${sources.planning?.automatic ? `automatic park-selection workflow; ${sources.planning.applications?.length || 0} application(s), ${sources.planning.documents?.length || 0} relevant document(s), ${sources.planning.featureCount || 0} promoted feature(s)` : "manual planning manifest/GeoJSON"}
+- Planning discovery failures: ${sources.planning?.failures?.length || 0}; warnings: ${sources.planning?.warnings?.length || 0}
 - Normalized source features: ${map.features.length}
 - Non-OSM map inputs accepted: ${map.sourceFusion?.acceptedFeatures ?? 0} (${map.sourceFusion?.overture?.accepted ?? 0} Overture gap feature(s), ${map.sourceFusion?.publicData?.accepted ?? 0} public-data observation(s))
 - Overture overlap safeguards: ${map.sourceFusion?.overture?.duplicatesWithheld ?? 0} duplicate(s) and ${map.sourceFusion?.overture?.partialOverlapsWithheld ?? 0} partial overlap(s) withheld
@@ -151,6 +153,7 @@ ${sources.elevation.dsm?.sha256 ? `- DSM SHA-256: \`${sources.elevation.dsm.sha2
 ${sources.elevation.transformation ? `- Coordinate transformation: ${sources.elevation.transformation.name}, grid SHA-256 \`${sources.elevation.transformation.gridHash}\`, source ${sources.elevation.transformation.gridSource}.` : ""}
 ${sources.orthophoto?.status === "available" ? `- Orthophoto: ${sources.orthophoto.source?.provider}; captured ${sources.orthophoto.source?.capturedAt || "date unknown"}; licence ${sources.orthophoto.source?.license || "not recorded"}; raster SHA-256 ${sources.orthophoto.rasters.map((raster) => `\`${raster.sha256}\``).join(", ")}.` : `- Orthophoto: unavailable (${sources.orthophoto?.warning || "not supplied"})`}
 ${formatFusionSources(map.sourceFusion)}
+${sources.planning?.automatic ? `- Planning discovery: bounded PlanIt spatial index plus ${sources.planning.discovery?.portalType || "configured"} official-portal adapter; official drawing URLs and hashes are recorded in \`planning-sources.json\`.` : "- Planning acquisition: reviewed manual manifest/GeoJSON input."}
 ${heightStats ? `- Structure-height method: ${heightStats.method}; ${heightStats.measured}/${heightStats.candidates} missing-height buildings measured, ${heightStats.conflicts} tagged conflicts retained.` : ""}
 ${(map.rideProfiles?.sourceCatalog || []).map((source) => `- Ride-profile input: ${source.file || source.kind}, SHA-256 \`${source.sha256 || "recorded by source"}\`${source.crs ? `, ${source.crs}` : ""}.`).join("\n")}
 - Universal fidelity model: OSM-compatible paths, surfaces, bridges, and trees plus portable GeoJSON observations. The active source capability matrix is stored in \`fidelity.json\`.

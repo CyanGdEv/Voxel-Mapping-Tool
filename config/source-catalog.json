@@ -7,9 +7,18 @@
       "id": "official-planning-registers",
       "name": "Official local planning authority registers",
       "role": ["ride-layout", "support-style", "buildings", "paths", "plazas", "materials", "walls", "fences", "levels", "archives"],
-      "authority": "world-authoritative-after-review",
-      "integration": "planning-manifest",
+      "authority": "world-authoritative-after-automatic-or-reviewed-eligibility-gates",
+      "integration": "automatic-portal-discovery-or-planning-manifest",
       "reuse": "document-specific; public viewing is not redistribution permission"
+    },
+    {
+      "id": "planit-uk",
+      "name": "UK PlanIt planning application index",
+      "url": "https://www.planit.org.uk/api/",
+      "role": ["bounded-application-discovery", "application-reference", "decision-metadata", "official-source-link"],
+      "authority": "discovery-only",
+      "integration": "bounded-spatial-api-adapter",
+      "worldEligible": false
     },
     {
       "id": "planning-data-gov-uk",
