@@ -28,7 +28,9 @@ jobs:
     env:
       PARK_ID: ${{ inputs.park }}
       OUTPUT_DIR: out/${{ inputs.park }}
-      TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT }}
+      # A repository URL is a valid identifying contact for public-data services.
+      # Administrators can still override it with a monitored email/project URL.
+      TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
       TPMAP_SHARED_CACHE_DIR: .tpmap-cache
       TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -68,10 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${TPMAP_CONTACT:-}" ]]; then
-            echo "Configure the TPMAP_CONTACT repository secret with a project URL or contact email." >&2
-            exit 2
-          fi
+          test -n "${TPMAP_CONTACT:-}"
           node src/cli.mjs parks | jq -e --arg park "$PARK_ID" '.[] | select(.id == $park and .planningDiscovery != null)' >/dev/null
 
       - name: Automatically discover planning evidence and build Bedrock world

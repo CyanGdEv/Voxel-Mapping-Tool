@@ -18,9 +18,10 @@ Each profile supplies bounded coordinates, its official planning portal adapter,
 
 ## Generate a park with GitHub Actions
 
-1. Add a repository secret named `TPMAP_CONTACT`. Use a project URL or monitored email; live OSM services require an identifying user agent.
-2. Open **Actions → Generate 1:1 theme park → Run workflow**.
-3. Select the park. This is the only run input.
+1. Open **Actions → Generate 1:1 theme park → Run workflow**.
+2. Select the park. This is the only run input.
+
+The workflow automatically uses the repository URL as the identifying contact required by public-data services. Administrators may optionally override it with a monitored email or project URL in a `TPMAP_CONTACT` repository secret; players do not need to configure it.
 
 The job searches the bounded [PlanIt application index](https://www.planit.org.uk/api/) and the selected park's official council register, follows official application/document links, ranks and downloads relevant drawings, extracts and georeferences plan geometry, checks decision/current-state evidence, then builds in `planning-only` mode. It independently validates LevelDB chunks and native signs, uploads the `.mcworld` as a direct file, and uploads the evidence bundle separately. Raw council documents remain in the private Actions cache and are not republished as artifacts.
 
