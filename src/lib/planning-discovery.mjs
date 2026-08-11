@@ -134,8 +134,14 @@ export async function discoverPlanningApplications(profile, options = {}, runtim
   } catch (error) {
     failures.push(failure(profile.planningDiscovery.portalType, profile.planningDiscovery.searchUrl, error));
   }
+  const priorityUrls = (profile.planningDiscovery.priorityApplicationUrls || []).map(canonicalUrl);
   for (const url of profile.planningDiscovery.seedApplicationUrls || []) {
-    candidates.push({ sourceUrl: url, discoveryProvider: "park-profile-official-seed", discoveryScore: 35 });
+    const priorityIndex = priorityUrls.indexOf(canonicalUrl(url));
+    candidates.push({
+      sourceUrl: url,
+      discoveryProvider: "park-profile-official-seed",
+      discoveryScore: priorityIndex >= 0 ? 10_000 - priorityIndex * 100 : 35
+    });
   }
 
   const deduped = new Map();
@@ -623,6 +629,11 @@ function uniqueBy(values, key) {
     seen.add(identity);
     return true;
   });
+}
+
+function canonicalUrl(value) {
+  try { return new URL(String(value || "")).toString(); }
+  catch { return String(value || ""); }
 }
 
 async function mapLimit(values, concurrency, worker) {
