@@ -44,6 +44,7 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(inputs, /^\s{6}park:/m);
   assert.doesNotMatch(inputs, /planning_manifest|strict:/);
   assert.match(workflow, /--park "\$PARK_ID"/);
+  assert.match(workflow, /"\$PARK_ID" == "alton-towers-resort"[\s\S]*--max-planning-applications 6/);
   assert.match(workflow, /--strict/);
   assert.doesNotMatch(workflow, /--planning-manifest/);
   assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
@@ -265,6 +266,29 @@ test("official archive seeds remain discoverable when a legacy portal has no mac
   assert.equal(result.applications.length, 1);
   assert.match(result.applications[0].sourceUrl, /PKID=42/);
   assert.equal(result.applications[0].discoveryProvider, "park-profile-official-seed");
+});
+
+test("priority archive seeds survive a deliberately small application limit", async () => {
+  const preferred = "https://planning.example/legacy/ApplicationSearchServlet?PKID=WICKER";
+  const secondary = "https://planning.example/legacy/ApplicationSearchServlet?PKID=GARDENS";
+  const priorityProfile = {
+    ...profile,
+    planningDiscovery: {
+      portalType: "legacy-idox",
+      searchUrl: "https://planning.example/legacy/ApplicationSearchServlet",
+      allowedDocumentHosts: ["planning.example"],
+      seedApplicationUrls: [secondary, preferred],
+      priorityApplicationUrls: [preferred, secondary]
+    }
+  };
+  const result = await discoverPlanningApplications(priorityProfile, { maxPlanningApplications: 1 }, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => ({ type: "FeatureCollection", total: 0, features: [] })
+  });
+  assert.equal(result.applications.length, 1);
+  assert.equal(result.applications[0].sourceUrl, preferred);
+  assert.ok(result.applications[0].discoveryScore >= 10_000);
 });
 
 test("planning acquisition automatically invokes discovery when a supported park has no manual manifest", async () => {
