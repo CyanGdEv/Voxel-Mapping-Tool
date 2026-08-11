@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
 
 const APPLICATION_LINK = /(?:applicationDetails\.do|ApplicationSearchServlet|StdDetails\.aspx|PlanningPK\.xml|planning\/application)/i;
-const DOCUMENT_LINK = /(?:AttachmentShowServlet|document|documents|doc\.aspx|download|attachment|viewfile|image)/i;
-const USEFUL_DOCUMENT = /(?:plan|drawing|layout|elevation|section|roof|landscap|planting|tree|arbor|material|finish|surface|path|plaza|ride|coaster|track|support|structure|drain|water|flood|earthwork|level|topograph|survey|boundary|fence|wall|retaining|bridge|tunnel|as[ -]?built|existing)/i;
-const NOISE_DOCUMENT = /(?:application form|ownership certificate|community infrastructure levy|cil form|consultation response|neighbour letter|site notice|press notice|fee|validation checklist|email|correspondence|committee agenda)/i;
+const USEFUL_DOCUMENT = /(?:\bplans?\b|drawing|layout|elevation|section|roof|landscap|planting|tree|arbor|material|finish|surface|path|plaza|ride|coaster|track|\bsupport(?:s| structure| layout| detail| foundation)?\b|structure|drain|water|flood|earthwork|level|topograph|survey|boundary|fence|wall|retaining|bridge|tunnel|as[ -]?built|existing)/i;
+const NOISE_DOCUMENT = /(?:application form|planning statement|decision notice|screening opinion|letter of representation|ownership certificate|community infrastructure levy|cil form|consultation response|neighbour letter|site notice|press notice|fee|validation checklist|email|correspondence|committee agenda)/i;
 
 export function extractHtmlLinks(html, baseUrl) {
   const links = [];
@@ -42,11 +41,38 @@ export function extractApplicationLinks(html, baseUrl, allowedHosts = []) {
 
 export function extractDocumentLinks(html, baseUrl, allowedHosts = []) {
   const allowed = allowedHostSet(baseUrl, allowedHosts);
-  return extractHtmlLinks(html, baseUrl)
+  return [...extractHtmlLinks(html, baseUrl), ...extractNecPublicAccessDocuments(html, baseUrl)]
     .filter((link) => allowed.has(new URL(link.url).hostname.toLowerCase()))
-    .filter((link) => DOCUMENT_LINK.test(`${link.url} ${link.text}`))
+    .filter((link) => isDirectDocumentLink(link.url))
     .map((link) => ({ ...link, ...classifyPlanningDocument(link.text, link.url) }))
     .sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
+}
+
+function extractNecPublicAccessDocuments(html, baseUrl) {
+  const modelText = String(html || "").match(/\bvar\s+model\s*=\s*(\{[\s\S]*?\});/)?.[1];
+  if (!modelText) return [];
+  try {
+    const model = JSON.parse(modelText);
+    return (model.Rows || []).flatMap((row) => {
+      const guid = String(row.Guid || "").trim();
+      if (!/^[a-f0-9]{20,}$/i.test(guid)) return [];
+      const title = cleanText([row.Doc_Type, row.Doc_Ref2].filter(Boolean).join(" - "));
+      return [{
+        url: new URL(`/PublicAccess_Live/Document/ViewDocument?id=${encodeURIComponent(guid)}`, baseUrl).toString(),
+        text: title || "Planning document"
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function isDirectDocumentLink(value) {
+  let url;
+  try { url = new URL(value); } catch { return false; }
+  if (/\.(?:pdf|tiff?|png|jpe?g|zip)(?:$|[?#])/i.test(url.pathname)) return true;
+  if (/(?:AttachmentShowServlet|ViewDocument|DownloadFile|download|attachment|viewfile|image)/i.test(url.pathname)) return true;
+  return false;
 }
 
 function allowedHostSet(baseUrl, allowedHosts) {
@@ -114,7 +140,7 @@ export function classifyPlanningDocument(title, url = "") {
   const value = cleanText(`${title || ""} ${decodeURIComponentSafe(url)}`);
   let role = "planning-document";
   if (/as[ -]?built|record drawing|completion plan/i.test(value)) role = "as-built-drawing";
-  else if (/ride|coaster|track|support|foundation|footing/i.test(value)) role = "ride-layout-and-structure";
+  else if (/ride|coaster|track|\bsupport(?:s| structure| layout| detail| foundation)?\b|foundation|footing/i.test(value)) role = "ride-layout-and-structure";
   else if (/site.*(?:plan|layout)|masterplan|general arrangement|proposed layout/i.test(value)) role = "site-layout";
   else if (/elevation|section|roof|level/i.test(value)) role = "elevations-and-sections";
   else if (/landscap|planting|tree|arbor|hedge|ecolog/i.test(value)) role = "landscape-and-vegetation";
@@ -126,7 +152,7 @@ export function classifyPlanningDocument(title, url = "") {
   let score = useful ? 45 : 5;
   if (/approved|decision|condition|as[ -]?built|existing/i.test(value)) score += 25;
   if (/general arrangement|site plan|layout|elevation|section/i.test(value)) score += 20;
-  if (/ride|coaster|track|support/i.test(value)) score += 20;
+  if (/ride|coaster|track|\bsupport(?:s| structure| layout| detail| foundation)?\b/i.test(value)) score += 20;
   if (noise) score -= 80;
   return { role, score, relevant: score >= 30, title: cleanText(title || role) };
 }
@@ -170,7 +196,9 @@ export function applicationIdentity(application) {
 export function decodeHtml(value) {
   return String(value || "")
     .replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#(\d+);/g, (_, number) => String.fromCodePoint(Number(number)));
+    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_, number) => String.fromCodePoint(Number.parseInt(number, 16)))
+    .replace(/&#(\d+);/g, (_, number) => String.fromCodePoint(Number(number)));
 }
 
 export function cleanText(value) {
