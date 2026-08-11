@@ -45,6 +45,8 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(workflow, /--park "\$PARK_ID"/);
   assert.match(workflow, /--strict/);
   assert.doesNotMatch(workflow, /--planning-manifest/);
+  assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
+  assert.doesNotMatch(workflow, /Configure the TPMAP_CONTACT repository secret/);
 });
 
 test("automatic planning controls are bounded and can be explicitly disabled for expert inputs", () => {
