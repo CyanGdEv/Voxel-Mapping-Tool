@@ -110,6 +110,28 @@ test("woodland, scrub, and hedge source features compile as dense vegetation evi
   assert.ok(compilation.meta.verticalStats.vegetationDensityDerivedModels > 0);
 });
 
+test("mapped polygon tree canopies derive crown diameter from net area", () => {
+  const feature = {
+    id: "canopy:with-hole",
+    kind: "vegetation",
+    subtype: "tree_canopy",
+    tags: {},
+    localGeometry: {
+      type: "Polygon",
+      coordinates: [
+        [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+        [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]
+      ]
+    },
+    source: { provider: "fixture-canopy" }
+  };
+  const map = { features: [feature] };
+  enrichUniversalFidelity(map, {}, { accuracyMode: "verified" });
+  assert.equal(feature.fidelity.tree.modelClass, "tree");
+  assert.equal(feature.fidelity.tree.crownSource, "mapped-canopy-equivalent-diameter");
+  assert.equal(feature.fidelity.tree.crownDiameterM, 11.1);
+});
+
 function way(id, coordinates, tags) {
   return {
     type: "way",
