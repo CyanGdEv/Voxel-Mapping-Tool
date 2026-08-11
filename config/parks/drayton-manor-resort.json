@@ -10,6 +10,7 @@
     "searchTerms": ["Drayton Manor Park", "Drayton Bassett", "B78 3TW"]
   },
   "planningDiscovery": {
+    "siteIdentityTerms": ["Drayton Manor Park", "Drayton Manor Theme Park"],
     "portalType": "idox",
     "searchUrl": "https://planning.lichfielddc.gov.uk/online-applications/search.do?action=simple",
     "allowedDocumentHosts": ["planning.lichfielddc.gov.uk"]

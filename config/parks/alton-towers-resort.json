@@ -11,6 +11,7 @@
   },
   "planningDiscovery": {
     "portalType": "legacy-idox",
+    "siteIdentityTerms": ["Alton Towers", "Alton Towers Resort", "Splash Landings Hotel"],
     "searchUrl": "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
     "allowedDocumentHosts": ["publicaccess.staffsmoorlands.gov.uk"],
     "priorityApplicationUrls": [

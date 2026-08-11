@@ -11,6 +11,7 @@ import {
 import { discoverPlanningApplications } from "../src/lib/planning-discovery.mjs";
 import {
   classifyPlanningDocument,
+  classifyPlanningApplication,
   extractApplicationLinks,
   extractDocumentLinks,
   extractDocumentPageLinks,
@@ -183,6 +184,82 @@ test("automatic discovery merges PlanIt spatial results with official portal sea
   assert.equal(result.failures.length, 0);
 });
 
+test("metadata triage scans beyond the crawl cap and selects geometry-rich park applications", async () => {
+  let requestedPageSize = null;
+  const result = await discoverPlanningApplications(profile, { maxPlanningApplications: 1 }, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async (url) => {
+      requestedPageSize = Number(new URL(url).searchParams.get("pg_sz"));
+      return {
+        type: "FeatureCollection",
+        total: 2,
+        features: [{
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [0, 51.01] },
+          properties: {
+            reference: "25/0001/SCR",
+            address: "Fixture Park FP1 1AA",
+            description: "Screening Opinion Request",
+            url: "https://planning.example/online-applications/applicationDetails.do?keyVal=NEW"
+          }
+        }, {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [0, 51.01] },
+          properties: {
+            reference: "18/0042/FUL",
+            address: "Fixture Park FP1 1AA",
+            description: "Construction of roller coaster, station building, paths and landscaping",
+            url: "https://planning.example/online-applications/applicationDetails.do?keyVal=VALUABLE"
+          }
+        }]
+      };
+    },
+    fetchText: async () => ""
+  });
+  assert.equal(requestedPageSize, 300);
+  assert.equal(result.applications.length, 1);
+  assert.equal(result.applications[0].reference, "18/0042/FUL");
+  assert.equal(result.summary.minimumApplicationScore, 180);
+  assert.equal(result.summary.rejectedApplications, 1);
+});
+
+test("metadata triage requires park identity and keeps geometry-bearing condition records", () => {
+  const condition = classifyPlanningApplication({
+    address: "Fixture Park, FP1 1AA",
+    proposal: "Discharge of conditions 3 and 6 for approved site layout, paths and materials"
+  }, profile);
+  assert.equal(condition.relevant, true);
+  assert.ok(condition.categories.includes("condition"));
+  assert.ok(condition.categories.includes("site-layout"));
+
+  const nearbyHouse = classifyPlanningApplication({
+    address: "Unrelated Cottage",
+    proposal: "Construction of house, access, drainage, landscaping and retaining walls"
+  }, profile);
+  assert.equal(nearbyHouse.relevant, false);
+  assert.equal(nearbyHouse.excludedReason, "outside-park-identity");
+
+  const consultation = classifyPlanningApplication({
+    address: "Fixture Park, FP1 1AA",
+    proposal: "Consultation from adjoining authority in connection with an application for a ride"
+  }, profile);
+  assert.equal(consultation.relevant, false);
+  assert.equal(consultation.excludedReason, "consultation-copy");
+
+  const townAliasProfile = {
+    ...profile,
+    name: "Chessington World of Adventures Resort",
+    aliases: ["Chessington"],
+    planningAuthority: { ...profile.planningAuthority, searchTerms: ["Chessington World of Adventures", "Leatherhead Road", "KT9 2NE"] }
+  };
+  const sameTown = classifyPlanningApplication({
+    address: "Chessington High Street",
+    proposal: "Construction of a building and landscaped parking area"
+  }, townAliasProfile);
+  assert.equal(sameTown.relevant, false, "a broad CLI alias must not become a planning-site identity");
+});
+
 test("PlanIt raw URLs cannot bypass a park's official-host allowlist", async () => {
   const result = await discoverPlanningApplications(profile, { maxPlanningApplications: 20 }, {
     cacheDir: "/tmp/not-used",
@@ -288,7 +365,7 @@ test("priority archive seeds survive a deliberately small application limit", as
   });
   assert.equal(result.applications.length, 1);
   assert.equal(result.applications[0].sourceUrl, preferred);
-  assert.ok(result.applications[0].discoveryScore >= 10_000);
+  assert.ok(result.applications[0].discoveryScore >= 9_000);
 });
 
 test("planning acquisition automatically invokes discovery when a supported park has no manual manifest", async () => {

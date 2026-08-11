@@ -158,10 +158,16 @@ export function classifyPlanningDocument(title, url = "") {
 }
 
 export function scorePlanningApplication(application, profile) {
+  return classifyPlanningApplication(application, profile).score;
+}
+
+export function classifyPlanningApplication(application, profile) {
   const haystack = cleanText([
     application.reference, application.address, application.proposal,
     application.description, application.status, application.decision
   ].filter(Boolean).join(" ")).toLowerCase();
+  const proposal = cleanText(application.proposal || application.description || "").toLowerCase();
+  const address = cleanText(application.address || application.location || "").toLowerCase();
   let score = Number(application.discoveryScore || 0);
   const terms = profile?.planningAuthority?.searchTerms || [];
   for (const term of terms) {
@@ -171,9 +177,55 @@ export function scorePlanningApplication(application, profile) {
     const tokens = normalized.split(/\s+/).filter((token) => token.length >= 4);
     score += tokens.filter((token) => haystack.includes(token)).length * 4;
   }
-  if (/theme park|amusement|roller\s*coaster|ride|attraction/i.test(haystack)) score += 15;
+  // CLI aliases can be broad place names (for example, "Chessington"), so only
+  // the formal venue name and authority search identity are safe site gates.
+  const primarySiteTerms = [profile?.name, terms[0], ...(profile?.planningDiscovery?.siteIdentityTerms || [])]
+    .map((term) => cleanText(term).toLowerCase())
+    .filter((term) => term.length >= 5);
+  const secondarySiteTerms = terms.slice(1)
+    .map((term) => cleanText(term).toLowerCase())
+    .filter((term) => term.length >= 5 && !primarySiteTerms.includes(term));
+  const primarySiteIdentity = primarySiteTerms.some((term) => haystack.includes(term));
+  const secondarySiteIdentity = secondarySiteTerms.some((term) => address.includes(term));
+  const siteMatch = primarySiteIdentity ? "primary" : secondarySiteIdentity ? "secondary" : "none";
+  score += primarySiteIdentity ? 100 : secondarySiteIdentity ? 25 : -200;
+
+  const categories = [];
+  addCategory(categories, "ride", /roller[ -]?coaster|\bride\b|attraction|amusement|queue(?:line)?|station building|zip[ -]?wire|tethered balloon|climbing wall|play equipment/i, proposal, 240, (value) => { score += value; });
+  addCategory(categories, "building", /\bbuilding\b|hotel|lodge|restaurant|caf[eé]|extension|roof|kiosk|cabin|portal|entrance|toilet|shop|office|warehouse|\bstructure\b|modular unit|container|stage|tent/i, proposal, 140, (value) => { score += value; });
+  addCategory(categories, "site-layout", /landscap|\bpaths?\b|footway|access|car park|parking|plaza|paving|surfacing|hardstand|ground[ -]?work|infrastructure|earthwork|master[ -]?plan|site plan|area plan/i, proposal, 120, (value) => { score += value; });
+  addCategory(categories, "vegetation-water", /\btrees?\b|planting|\bgardens?\b|woodland|water|drain|flood|\blake\b|\bpond\b|\bdam\b|ecolog|habitat/i, proposal, 100, (value) => { score += value; });
+  addCategory(categories, "boundary-structure", /\bfenc|\bwalls?\b|barrier|bridge|tunnel|railing|balustrade|gate|retaining/i, proposal, 90, (value) => { score += value; });
+  addCategory(categories, "heritage", /listed building|heritage|restoration|conservation|historic/i, proposal, 90, (value) => { score += value; });
+  addCategory(categories, "detail", /\bsign|advertisement|artwork|sculpture|theming|lighting|floodlight/i, proposal, 70, (value) => { score += value; });
+  addCategory(categories, "condition", /discharg(?:e|ing).*condition|\bconditions?\b.*(?:application|permission)|variation of (?:a )?conditions?|non[ -]?material amendment|reserved matters/i, proposal, 60, (value) => { score += value; });
+  addCategory(categories, "structural-works", /construction|erection|demolition|alterations?|development|external works|refurbish|redevelop|reposition|relocat|install(?:ation)?|replacement/i, proposal, 60, (value) => { score += value; });
+
+  const consultationCopy = /^consultation from\b|consultation .*in connection with an application/i.test(proposal);
+  const telecommunications = /telecommunications?|antenna|monopole|radio equipment|mobile network|microwave dish|cell site/i.test(proposal);
+  const screeningOnly = /screening opinion request/i.test(proposal);
+  if (consultationCopy) score -= 1_000;
+  if (telecommunications) score -= 180;
+  if (screeningOnly) score -= 120;
   if (/withdrawn|refused|invalid|demolish(?:ed|ion)?|superseded/i.test(haystack)) score -= 8;
-  return score;
+  const parkIdentityAccepted = siteMatch === "primary" || (siteMatch === "secondary" && categories.includes("ride"));
+  return {
+    score,
+    relevant: parkIdentityAccepted && categories.length > 0 && !consultationCopy && !telecommunications && !screeningOnly,
+    siteMatch,
+    categories,
+    excludedReason: consultationCopy ? "consultation-copy"
+      : telecommunications ? "telecommunications"
+        : screeningOnly ? "screening-only"
+          : !parkIdentityAccepted ? "outside-park-identity"
+            : categories.length === 0 ? "no-geometry-category" : null
+  };
+}
+
+function addCategory(categories, category, pattern, value, weight, addScore) {
+  if (!pattern.test(value)) return;
+  categories.push(category);
+  addScore(weight);
 }
 
 export function applicationIdentity(application) {
