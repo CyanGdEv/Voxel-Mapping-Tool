@@ -6,21 +6,21 @@
   "bbox": { "south": 52.9765, "west": -1.9130, "north": 53.0000, "east": -1.8700 },
   "planningAuthority": {
     "name": "Staffordshire Moorlands District Council",
-    "officialPortal": "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
+    "officialPortal": "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
     "searchTerms": ["Alton Towers", "Farley Lane", "ST10 4DB"]
   },
   "planningDiscovery": {
     "portalType": "legacy-idox",
-    "searchUrl": "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
+    "searchUrl": "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
     "allowedDocumentHosts": ["publicaccess.staffsmoorlands.gov.uk"],
     "seedApplicationUrls": [
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=157904",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=12676",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=16193",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=104356",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=16183",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=84554",
-      "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=127678"
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=157904",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=12676",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=16193",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=104356",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=16183",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=84554",
+      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=127678"
     ]
   },
   "defaults": {

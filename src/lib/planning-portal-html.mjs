@@ -17,10 +17,15 @@ export function extractHtmlLinks(html, baseUrl) {
     let match;
     while ((match = pattern.exec(source))) {
       const href = decodeHtml(match[2] || "").trim();
-      if (!href || /^(?:javascript:|mailto:|tel:|#)/i.test(href)) continue;
+      if (!href || /^(?:mailto:|tel:|#)/i.test(href)) continue;
       let url;
-      try { url = new URL(href, baseUrl).toString(); } catch { continue; }
-      if (!/^https:/i.test(url) || seen.has(url)) continue;
+      const legacyBlob = href.match(/^javascript:AppBlobImage\(\s*['"]?([^'"\s;)]+)['"]?\s*\)/i);
+      try {
+        url = legacyBlob
+          ? new URL(`AttachmentShowServlet?ImageName=${encodeURIComponent(legacyBlob[1])}`, baseUrl).toString()
+          : new URL(href, baseUrl).toString();
+      } catch { continue; }
+      if (!/^https?:/i.test(url) || seen.has(url)) continue;
       seen.add(url);
       links.push({ url, text: cleanText(match[3] || href) });
     }
@@ -28,12 +33,15 @@ export function extractHtmlLinks(html, baseUrl) {
   return links;
 }
 
-export function extractApplicationLinks(html, baseUrl) {
-  return extractHtmlLinks(html, baseUrl).filter((link) => APPLICATION_LINK.test(link.url));
+export function extractApplicationLinks(html, baseUrl, allowedHosts = []) {
+  const allowed = allowedHostSet(baseUrl, allowedHosts);
+  return extractHtmlLinks(html, baseUrl)
+    .filter((link) => allowed.has(new URL(link.url).hostname.toLowerCase()))
+    .filter((link) => APPLICATION_LINK.test(link.url));
 }
 
 export function extractDocumentLinks(html, baseUrl, allowedHosts = []) {
-  const allowed = new Set([new URL(baseUrl).hostname, ...allowedHosts].map((value) => String(value).toLowerCase()));
+  const allowed = allowedHostSet(baseUrl, allowedHosts);
   return extractHtmlLinks(html, baseUrl)
     .filter((link) => allowed.has(new URL(link.url).hostname.toLowerCase()))
     .filter((link) => DOCUMENT_LINK.test(`${link.url} ${link.text}`))
@@ -41,16 +49,26 @@ export function extractDocumentLinks(html, baseUrl, allowedHosts = []) {
     .sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
 }
 
-export function extractDocumentPageLinks(html, baseUrl) {
-  return extractHtmlLinks(html, baseUrl).filter((link) =>
-    /(?:activeTab=documents|\bdocuments?\b|DocList|AssociatedFiles)/i.test(`${link.url} ${link.text}`)
-  );
+function allowedHostSet(baseUrl, allowedHosts) {
+  return new Set([new URL(baseUrl).hostname, ...allowedHosts].map((value) => String(value).toLowerCase()));
+}
+
+export function extractDocumentPageLinks(html, baseUrl, allowedHosts = []) {
+  const allowed = allowedHostSet(baseUrl, allowedHosts);
+  return extractHtmlLinks(html, baseUrl)
+    .filter((link) => allowed.has(new URL(link.url).hostname.toLowerCase()))
+    .filter((link) =>
+      /(?:activeTab=documents|\bdocuments?\b|DocList|AssociatedFiles)/i.test(`${link.url} ${link.text}`)
+    );
 }
 
 export function parsePlanningApplicationPage(html, url) {
   const text = cleanText(html);
+  const tableFields = extractTableFields(html);
   const field = (...labels) => {
     for (const label of labels) {
+      const exact = tableFields.get(cleanText(label).toLowerCase());
+      if (exact) return exact;
       const escaped = escapeRegExp(label);
       const patterns = [
         new RegExp(`${escaped}\\s*(?:<\\/[^>]+>\\s*)*(?:<[^>]+>\\s*)*([^<]{1,500})`, "i"),
@@ -75,6 +93,21 @@ export function parsePlanningApplicationPage(html, url) {
     northing: numberField(field("Northing", "Y coordinate")),
     sourceUrl: url
   };
+}
+
+function extractTableFields(html) {
+  const fields = new Map();
+  const rows = String(html || "").match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)]
+      .map((match) => cleanText(match[1]))
+      .filter(Boolean);
+    for (let index = 0; index + 1 < cells.length; index += 2) {
+      const label = cells[index].replace(/\s*[:\-]\s*$/, "").toLowerCase();
+      if (label && !fields.has(label)) fields.set(label, cells[index + 1]);
+    }
+  }
+  return fields;
 }
 
 export function classifyPlanningDocument(title, url = "") {
@@ -162,6 +195,7 @@ function normalizeDate(value) {
 }
 
 function numberField(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
   const number = Number(String(value || "").replace(/[^0-9.-]+/g, ""));
   return Number.isFinite(number) ? number : null;
 }

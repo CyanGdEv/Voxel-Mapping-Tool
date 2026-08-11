@@ -24,6 +24,12 @@ const DEFAULT_PLANIT = "https://www.planit.org.uk/api/applics/geojson";
 const MAX_APPLICATIONS_HARD = 2_000;
 const MAX_DOCUMENTS_HARD = 500;
 const MAX_PAGES_HARD = 50;
+const APPLICATION_CRAWL_CONCURRENCY = 4;
+const DOCUMENT_PROCESS_CONCURRENCY = 3;
+const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
+const DOCUMENT_REQUEST_TIMEOUT_MS = 120_000;
+const PORTAL_RETRIES = 1;
+const PORTAL_FAILURE_THRESHOLD = 2;
 
 export async function acquireAutomaticPlanningEvidence(options, runtime) {
   const profile = options.parkProfile;
@@ -35,27 +41,45 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
   }
 
   const limits = discoveryLimits(options);
-  const discovery = await discoverPlanningApplications(profile, options, runtime, limits);
+  const planningRuntime = {
+    ...runtime,
+    planningPortalHealth: runtime.planningPortalHealth || new Map()
+  };
+  const discovery = await discoverPlanningApplications(profile, options, planningRuntime, limits);
   result.discovery = discovery.summary;
   result.failures.push(...discovery.failures);
   result.warnings.push(...discovery.warnings);
+  emitProgress(planningRuntime,
+    `Planning discovery: ${discovery.applications.length} relevant application(s) from ${discovery.summary.candidates} candidate(s)`);
 
   const applications = discovery.applications.slice(0, limits.applications);
   const documentQueue = [];
-  for (const application of applications) {
-    if (documentQueue.length >= limits.documents) break;
-    const crawled = await crawlApplicationDocuments(application, profile, options, runtime, limits);
-    result.failures.push(...crawled.failures);
-    result.warnings.push(...crawled.warnings);
-    result.applications.push(crawled.application);
-    for (const document of crawled.documents) {
-      if (documentQueue.length >= limits.documents) break;
-      documentQueue.push({ document, application: crawled.application });
+  for (let start = 0; start < applications.length && documentQueue.length < limits.documents;
+    start += APPLICATION_CRAWL_CONCURRENCY) {
+    const batch = applications.slice(start, start + APPLICATION_CRAWL_CONCURRENCY);
+    const crawledBatch = await Promise.all(batch.map((application) =>
+      crawlApplicationDocuments(application, profile, options, planningRuntime, limits)));
+    for (const crawled of crawledBatch) {
+      result.failures.push(...crawled.failures);
+      result.warnings.push(...crawled.warnings);
+      result.applications.push(crawled.application);
+      for (const document of crawled.documents) {
+        if (documentQueue.length >= limits.documents) break;
+        documentQueue.push({ document, application: crawled.application });
+      }
     }
+    emitProgress(planningRuntime,
+      `Planning crawl: ${Math.min(start + batch.length, applications.length)}/${applications.length} application(s), ${documentQueue.length}/${limits.documents} relevant document(s)`);
   }
 
-  const processedDocuments = await mapLimit(documentQueue, 2, ({ document, application }) =>
-    processPlanningDocument(document, application, profile, options, runtime, limits));
+  let processedCount = 0;
+  const processedDocuments = await mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+    const processed = await processPlanningDocument(document, application, profile, options, planningRuntime, limits);
+    processedCount += 1;
+    emitProgress(planningRuntime,
+      `Planning extraction: ${processedCount}/${documentQueue.length} document(s), ${processed.evidence.extraction.length} page result(s) in latest document`);
+    return processed;
+  });
   for (let index = 0; index < processedDocuments.length; index += 1) {
     const processed = processedDocuments[index];
     const { document, application } = documentQueue[index];
@@ -194,8 +218,8 @@ async function discoverWithPlanIt(profile, options, runtime, limits) {
         status: other.status || properties.status || properties.app_state,
         decision: other.decision || properties.decision || properties.app_state,
         decisionDate: properties.decided_date,
-        sourceUrl: officialApplicationUrl(properties),
-        documentsUrl: /^https:\/\//i.test(String(other.docs_url || "")) ? other.docs_url : null,
+        sourceUrl: officialApplicationUrl(properties, profile),
+        documentsUrl: allowedOfficialUrl(other.docs_url, profile),
         easting: other.easting ?? null,
         northing: other.northing ?? null,
         lat: other.lat ?? other.latitude ?? null,
@@ -220,7 +244,7 @@ async function discoverWithOfficialPortal(profile, options, runtime) {
     url.searchParams.set("searchType", "Application");
     url.searchParams.set("searchCriteria.simpleSearchString", term);
     const html = await fetchTextCached(url.toString(), options, runtime, "official-search");
-    for (const link of extractApplicationLinks(html, url)) {
+    for (const link of extractApplicationLinks(html, url, adapter.allowedDocumentHosts || [])) {
       applications.push({ sourceUrl: link.url, description: link.text, discoveryProvider: "official-portal-search", discoveryScore: 45 });
     }
   }
@@ -240,7 +264,7 @@ async function crawlApplicationDocuments(applicationInput, profile, options, run
     application = mergeApplication(application, parsePlanningApplicationPage(html, application.sourceUrl));
     const allowed = profile.planningDiscovery.allowedDocumentHosts || [];
     documents.push(...extractDocumentLinks(html, application.sourceUrl, allowed));
-    const documentPages = extractDocumentPageLinks(html, application.sourceUrl);
+    const documentPages = extractDocumentPageLinks(html, application.sourceUrl, allowed);
     if (application.documentsUrl) documentPages.push({ url: application.documentsUrl, text: "Official documents" });
     const syntheticIdox = idoxDocumentsUrl(application.sourceUrl);
     if (syntheticIdox) documentPages.push({ url: syntheticIdox, text: "Documents" });
@@ -316,7 +340,7 @@ async function processPlanningDocument(document, application, profile, options, 
       extension,
       fetcher: () => runtime.fetchBinary
         ? runtime.fetchBinary(document.url, { headers: requestHeaders(runtime.userAgent, "application/pdf,image/*,*/*") })
-        : fetchBinary(document.url, { headers: requestHeaders(runtime.userAgent, "application/pdf,image/*,*/*") }, { timeoutMs: 180_000, retries: 2 })
+        : fetchPortalBinary(document.url, runtime, "application/pdf,image/*,*/*")
     });
     sourceFile = cached.filename;
     const bytes = await readFile(sourceFile);
@@ -403,27 +427,107 @@ function discoveryLimits(options) {
 }
 
 async function fetchTextCached(url, options, runtime, bucket) {
-  if (runtime.fetchText) return runtime.fetchText(url, { headers: requestHeaders(runtime.userAgent, "text/html,application/xhtml+xml") });
-  const cached = await cachedBinary({
-    cacheDir: path.join(runtime.cacheDir, "planning-discovery", bucket),
-    key: url,
-    noCache: options.noCache,
-    extension: ".html",
-    fetcher: () => fetchBinary(url, { headers: requestHeaders(runtime.userAgent, "text/html,application/xhtml+xml") }, { timeoutMs: 120_000, retries: 2 })
-  });
-  return readFile(cached.filename, "utf8");
+  assertPortalAvailable(url, runtime);
+  try {
+    if (runtime.fetchText) {
+      const value = await runtime.fetchText(url, { headers: requestHeaders(runtime.userAgent, "text/html,application/xhtml+xml") });
+      recordPortalSuccess(url, runtime);
+      return value;
+    }
+    const cached = await cachedBinary({
+      cacheDir: path.join(runtime.cacheDir, "planning-discovery", bucket),
+      key: url,
+      noCache: options.noCache,
+      extension: ".html",
+      fetcher: () => fetchBinary(url, {
+        headers: requestHeaders(runtime.userAgent, "text/html,application/xhtml+xml")
+      }, { timeoutMs: PORTAL_REQUEST_TIMEOUT_MS, retries: PORTAL_RETRIES })
+    });
+    recordPortalSuccess(url, runtime);
+    return readFile(cached.filename, "utf8");
+  } catch (error) {
+    recordPortalFailure(url, runtime, error);
+    throw error;
+  }
 }
 
-function officialApplicationUrl(properties) {
+function officialApplicationUrl(properties, profile) {
   for (const key of ["url", "application_url", "comment_url", "external_url", "web_url", "source_url"]) {
     const value = properties?.[key];
-    if (/^https:\/\//i.test(String(value || "")) && !/planit\.org\.uk/i.test(value)) return value;
+    const allowed = allowedOfficialUrl(value, profile);
+    if (allowed && !/planit\.org\.uk/i.test(allowed)) return allowed;
   }
   const other = properties?.other_fields || {};
   for (const [key, value] of Object.entries(other)) {
-    if (/url|link/i.test(key) && /^https:\/\//i.test(String(value || "")) && !/planit\.org\.uk/i.test(value)) return value;
+    const allowed = /url|link/i.test(key) ? allowedOfficialUrl(value, profile) : null;
+    if (allowed && !/planit\.org\.uk/i.test(allowed)) return allowed;
   }
   return null;
+}
+
+function allowedOfficialUrl(value, profile) {
+  try {
+    const url = new URL(String(value || ""));
+    const allowedHosts = new Set((profile?.planningDiscovery?.allowedDocumentHosts || [])
+      .map((host) => String(host).toLowerCase()));
+    return /^https?:$/.test(url.protocol) && allowedHosts.has(url.hostname.toLowerCase())
+      ? url.toString()
+      : null;
+  } catch { return null; }
+}
+
+async function fetchPortalBinary(url, runtime, accept) {
+  assertPortalAvailable(url, runtime);
+  try {
+    const bytes = await fetchBinary(url, {
+      headers: requestHeaders(runtime.userAgent, accept)
+    }, { timeoutMs: DOCUMENT_REQUEST_TIMEOUT_MS, retries: PORTAL_RETRIES });
+    recordPortalSuccess(url, runtime);
+    return bytes;
+  } catch (error) {
+    recordPortalFailure(url, runtime, error);
+    throw error;
+  }
+}
+
+function assertPortalAvailable(url, runtime) {
+  const state = portalState(url, runtime);
+  if (state?.open) throw new Error(
+    `official planning portal circuit open after ${state.failures} outage response(s): ${new URL(url).hostname}`
+  );
+}
+
+function recordPortalSuccess(url, runtime) {
+  const health = runtime.planningPortalHealth;
+  if (!health) return;
+  const host = new URL(url).hostname.toLowerCase();
+  health.set(host, { failures: 0, open: false });
+}
+
+function recordPortalFailure(url, runtime, error) {
+  if (!isPortalOutage(error) || !runtime.planningPortalHealth) return;
+  const host = new URL(url).hostname.toLowerCase();
+  const previous = runtime.planningPortalHealth.get(host) || { failures: 0, open: false };
+  const failures = previous.failures + 1;
+  runtime.planningPortalHealth.set(host, {
+    failures,
+    open: failures >= PORTAL_FAILURE_THRESHOLD,
+    lastError: error?.message || String(error)
+  });
+}
+
+function portalState(url, runtime) {
+  try { return runtime.planningPortalHealth?.get(new URL(url).hostname.toLowerCase()) || null; }
+  catch { return null; }
+}
+
+function isPortalOutage(error) {
+  return /HTTP (?:408|425|429|5\d\d)|aborted|abort|timeout|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i
+    .test(error?.message || String(error));
+}
+
+function emitProgress(runtime, message) {
+  if (typeof runtime.progress === "function") runtime.progress(message);
 }
 
 function normalizeApplication(application) {

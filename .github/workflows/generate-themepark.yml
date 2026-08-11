@@ -45,15 +45,15 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Restore planning discovery and derivative cache
-        uses: actions/cache@v6
+      - name: Restore bounded source and planning cache
+        id: source-cache
+        uses: actions/cache/restore@v6
         with:
-          path: |
-            .tpmap-cache/planning-discovery
-            .tpmap-cache/prepared-generator
-          key: planning-v2-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/planning-*.mjs', 'src/tools/planning_raster_vectorize.py') }}
+          path: .tpmap-cache
+          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}
           restore-keys: |
-            planning-v2-${{ runner.os }}-${{ inputs.park }}-
+            source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
+            source-v3-${{ runner.os }}-${{ inputs.park }}-
 
       - name: Install geospatial and planning-drawing tools
         run: |
@@ -90,6 +90,13 @@ jobs:
           )
           node src/cli.mjs "${args[@]}"
 
+      - name: Save acquired sources and planning derivatives
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .tpmap-cache
+          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}
+
       - name: Verify authority, provenance, labels, and world archive
         shell: bash
         run: |
@@ -115,11 +122,12 @@ jobs:
           retention-days: 30
 
       - name: Upload evidence and validation bundle
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: evidence-${{ inputs.park }}-${{ github.run_number }}
           path: |
             ${{ env.OUTPUT_DIR }}/**
             !${{ env.OUTPUT_DIR }}/*.mcworld
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90

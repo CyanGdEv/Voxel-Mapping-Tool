@@ -27,8 +27,13 @@ test("ships profiles for the five requested UK parks", async () => {
     "legoland-windsor-resort",
     "thorpe-park"
   ]);
-  assert.ok(profiles.every((profile) => profile.planningAuthority.officialPortal.startsWith("https://")));
-  assert.ok(profiles.every((profile) => profile.planningDiscovery.searchUrl.startsWith("https://")));
+  assert.ok(profiles.every((profile) => {
+    const url = new URL(profile.planningDiscovery.searchUrl);
+    return url.protocol === "https:" || (
+      profile.planningDiscovery.portalType === "legacy-idox" &&
+      profile.planningDiscovery.allowedDocumentHosts.includes(url.hostname)
+    );
+  }));
   assert.ok(profiles.every((profile) => ["idox", "legacy-idox", "northgate"].includes(profile.planningDiscovery.portalType)));
 });
 

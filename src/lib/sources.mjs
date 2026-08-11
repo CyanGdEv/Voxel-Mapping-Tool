@@ -11,7 +11,7 @@ const DEFAULT_NOMINATIM = "https://nominatim.openstreetmap.org/search";
 const DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter";
 const DEFAULT_OPEN_METEO = "https://api.open-meteo.com/v1/elevation";
 
-export async function acquireSources(options) {
+export async function acquireSources(options, progress = () => {}) {
   const cacheDir = path.resolve(options.cache || ".tpmap-cache");
   await ensureDir(cacheDir);
   const contact = options.contact || process.env.TPMAP_CONTACT;
@@ -44,26 +44,31 @@ export async function acquireSources(options) {
     );
   }
 
-  let osm;
-  if (options.osm) {
-    const filename = path.resolve(options.osm);
-    const data = await readJson(filename);
-    osm = { data, dataHash: sha256(data), filename, source: "local", cacheHit: true };
-  } else {
-    osm = await fetchOverpass({ ...options, bbox, cacheDir, userAgent });
-  }
-
   const center = bboxCenter(bbox);
-  const elevation = await acquireElevation({ ...options, bbox, cacheDir, userAgent });
-  const orthophoto = await acquireOrthophotos(
-    { ...options, bbox, cacheDir, userAgent },
-    { center, projector: createProjector(center), elevation }
-  );
-  const supplemental = await acquireSupplementalSources(options, {
+  progress("Acquiring alignment, terrain, and independent public datasets in parallel");
+  const osmPromise = options.osm
+    ? readJson(path.resolve(options.osm)).then((data) => ({
+        data,
+        dataHash: sha256(data),
+        filename: path.resolve(options.osm),
+        source: "local",
+        cacheHit: true
+      }))
+    : fetchOverpass({ ...options, bbox, cacheDir, userAgent });
+  const elevationPromise = acquireElevation({ ...options, bbox, cacheDir, userAgent });
+  const supplementalPromise = acquireSupplementalSources(options, {
     bbox, center, cacheDir, userAgent
   });
+  const orthophotoPromise = elevationPromise.then((elevation) => acquireOrthophotos(
+    { ...options, bbox, cacheDir, userAgent },
+    { center, projector: createProjector(center), elevation }
+  ));
+  const [osm, elevation, supplemental, orthophoto] = await Promise.all([
+    osmPromise, elevationPromise, supplementalPromise, orthophotoPromise
+  ]);
+  progress("Discovering, downloading, and extracting official planning evidence");
   const planning = await acquirePlanningEvidence(options, {
-    bbox, center, cacheDir, userAgent, elevation, orthophoto, supplemental
+    bbox, center, cacheDir, userAgent, elevation, orthophoto, supplemental, progress
   });
   return {
     parkName: options.parkName || geocoder?.displayName?.split(",")[0] || "Theme Park",
