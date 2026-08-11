@@ -88,6 +88,27 @@ test("official portal HTML adapters recover applications, metadata and ranked dr
   assert.equal(parsed.decisionDate, "2025-07-10");
 });
 
+test("legacy Idox AppBlobImage links become allowlisted integrity-checkable documents", () => {
+  const base = "http://planning.example/portal/servlets/ApplicationSearchServlet?PKID=42";
+  const html = `<table>
+    <tr><th>Application number</th><td>SMD/2025/0042</td><th>Application type</th><td>Full</td></tr>
+    <tr><th>Site address</th><td>Fixture Park</td><th>Proposal</th><td>Existing ride alterations</td></tr>
+    <tr><th>Decision</th><td>Planning Permission - Approved</td><th>Decision Date</th><td>23/06/2025</td></tr>
+  </table><a href="javascript:AppBlobImage('385881');">Site Plan as Existing - Scale 1:500</a>`;
+  const documents = extractDocumentLinks(html, base, ["planning.example"]);
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0].url,
+    "http://planning.example/portal/servlets/AttachmentShowServlet?ImageName=385881");
+  assert.equal(documents[0].relevant, true);
+  assert.equal(documents[0].role, "site-layout");
+  const application = parsePlanningApplicationPage(html, base);
+  assert.equal(application.reference, "SMD/2025/0042");
+  assert.equal(application.proposal, "Existing ride alterations");
+  assert.equal(application.decision, "Planning Permission - Approved");
+  assert.equal(application.decisionDate, "2025-06-23");
+  assert.equal(application.easting, null);
+});
+
 test("automatic discovery merges PlanIt spatial results with official portal search and removes unrelated records", async () => {
   const planit = {
     type: "FeatureCollection",
@@ -138,6 +159,35 @@ test("blocked discovery services produce diagnostics instead of silently substit
   assert.equal(result.applications.length, 0);
   assert.equal(result.failures.length, 2);
   assert.match(result.failures.map((item) => item.error).join(" "), /rate limited|access denied/);
+});
+
+test("an unavailable official host opens a circuit instead of timing out once per application", async () => {
+  let portalCalls = 0;
+  const applications = Array.from({ length: 12 }, (_, index) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [0, 51.01] },
+    properties: {
+      reference: `25/${String(index).padStart(4, "0")}/FUL`,
+      address: "Fixture Park FP1 1AA",
+      description: "Existing ride structure",
+      app_state: "Permitted",
+      url: `http://planning.example/applicationDetails.do?keyVal=${index}`
+    }
+  }));
+  const result = await acquirePlanningEvidence({ parkProfile: profile }, {
+    bbox: profile.bbox,
+    center: { lat: 51.01, lon: 0 },
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => ({ type: "FeatureCollection", total: applications.length, features: applications }),
+    fetchText: async () => {
+      portalCalls += 1;
+      throw new Error("HTTP 502 from planning.example");
+    }
+  });
+  assert.equal(result.applications.length, 12);
+  assert.ok(portalCalls <= 5, `portal was called ${portalCalls} times`);
+  assert.match(result.failures.map((item) => item.error).join(" "), /circuit open/);
 });
 
 test("official archive seeds remain discoverable when a legacy portal has no machine-search endpoint", async () => {

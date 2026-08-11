@@ -24,12 +24,40 @@ import { applyPlanningWorldAuthority } from "./planning-world-authority.mjs";
 
 export async function buildPark(options = {}, progress = () => {}) {
   options = { planningWorldAuthority: "planning-only", ...options };
+  const requestedName = options.parkProfile?.name || options.parkName || "theme-park";
+  const requestedOutputDir = path.resolve(options.out || path.join("out", slugify(requestedName)));
+  await ensureDir(requestedOutputDir);
   progress("Resolving bounded public sources");
-  const sources = await acquireSources(options);
+  let sources;
+  try {
+    sources = await acquireSources(options, progress);
+  } catch (error) {
+    await writeJson(path.join(requestedOutputDir, "source-acquisition-failure.json"), {
+      schemaVersion: 1,
+      failedAt: new Date().toISOString(),
+      parkId: options.parkProfile?.id || null,
+      stage: "source-acquisition",
+      error: error?.message || String(error)
+    });
+    throw error;
+  }
   const parkName = sources.parkName;
   const slug = slugify(parkName);
-  const outputDir = path.resolve(options.out || path.join("out", slug));
+  const outputDir = options.out ? requestedOutputDir : path.resolve(path.join("out", slug));
   await ensureDir(outputDir);
+  const acquisitionDiagnosticsPath = await writeJson(path.join(outputDir, "source-acquisition.json"), {
+    schemaVersion: 1,
+    acquiredAt: sources.acquiredAt,
+    parkName,
+    bbox: sources.bbox,
+    osm: withoutLargeData(sources.osm),
+    elevation: withoutLargeData(sources.elevation),
+    orthophoto: withoutLargeData(sources.orthophoto),
+    supplemental: compactSupplementalSources(sources.supplemental),
+    planning: compactPlanningEvidence(sources.planning),
+    planningFailures: sources.planning?.failures || [],
+    planningWarnings: sources.planning?.warnings || []
+  });
 
   progress("Normalizing map geometry and provenance");
   const map = await normalizeMap(sources, options);
@@ -217,6 +245,7 @@ export async function buildPark(options = {}, progress = () => {}) {
       reconstructionGraph: reconstructionGraphPath,
       planningSources: planningSourcesPath,
       planningDiscovery: planningDiscoveryPath,
+      acquisitionDiagnostics: acquisitionDiagnosticsPath,
       sourceAuthority: sourceAuthorityPath,
       orthophotoEvidence: orthophotoEvidencePath,
       orthophotoQa: orthophotoQaPath,

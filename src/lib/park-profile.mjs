@@ -64,8 +64,13 @@ export function validateParkProfile(profile, source = "park profile") {
   if (!profile.planningDiscovery?.portalType || !profile.planningDiscovery?.searchUrl) {
     throw new UserError(`${source} must configure automatic planning discovery`);
   }
-  if (!/^https:\/\//i.test(profile.planningDiscovery.searchUrl)) {
-    throw new UserError(`${source} planningDiscovery.searchUrl must use HTTPS`);
+  const discoveryUrl = new URL(profile.planningDiscovery.searchUrl);
+  const allowedHosts = new Set((profile.planningDiscovery.allowedDocumentHosts || [])
+    .map((host) => String(host).toLowerCase()));
+  const allowLegacyHttp = profile.planningDiscovery.portalType === "legacy-idox" &&
+    discoveryUrl.protocol === "http:" && allowedHosts.has(discoveryUrl.hostname.toLowerCase());
+  if (discoveryUrl.protocol !== "https:" && !allowLegacyHttp) {
+    throw new UserError(`${source} planningDiscovery.searchUrl must use HTTPS unless an allowlisted legacy-idox authority is HTTP-only`);
   }
   return profile;
 }
