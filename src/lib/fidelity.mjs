@@ -2,6 +2,7 @@ import {
   blockForThemeParkSurfaceStyle,
   withThemeParkMaterialHints
 } from "./surface-material-library.mjs";
+import { polygonArea } from "./geo.mjs";
 
 const PATH_KINDS = new Set(["path", "road"]);
 
