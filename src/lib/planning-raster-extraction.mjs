@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { classifyComprehensivePlanningLabel } from "./planning-comprehensive-semantics.mjs";
+import { detectPlanningScales } from "./planning-auto-georeference.mjs";
 
 const execFileAsync = promisify(execFile);
 const MODULE = fileURLToPath(import.meta.url);
@@ -46,11 +47,18 @@ export async function extractRasterPlanningPage({ filename, page = 1, workDirect
     maxBuffer: 8 * 1024 * 1024
   });
   const svg = await readFile(output, "utf8");
-  const anchors = mergeOcrAnchors(
-    await extractRasterTextAnchors(image),
-    await extractRasterTextAnchors(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })
-  );
-  const semantic = { anchors, source: "tesseract-tsv" };
+  const [primaryText, redText] = await Promise.all([
+    extractRasterTextObservations(image),
+    extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })
+  ]);
+  const anchors = mergeOcrAnchors(primaryText.anchors, redText.anchors);
+  const rawLines = mergeRawLines(primaryText.lines, redText.lines);
+  const semantic = {
+    anchors,
+    rawLines,
+    scaleCandidates: detectPlanningScales(rawLines.map((line) => line.text).join("\n")),
+    source: "tesseract-tsv"
+  };
   if (cache) await writeCachedDerivative(cache, { svg, semantic });
   return {
     svg,
@@ -208,19 +216,27 @@ async function rasterImage(filename, page, workDirectory, key, mime) {
 }
 
 export async function extractRasterTextAnchors(filename, options = {}) {
+  return (await extractRasterTextObservations(filename, options)).anchors;
+}
+
+export async function extractRasterTextObservations(filename, options = {}) {
   try {
     const { stdout } = await execFileAsync("tesseract", [filename, "stdout", "--psm", "11", "tsv"], {
       timeout: 180_000,
       maxBuffer: 32 * 1024 * 1024,
       encoding: "utf8"
     });
-    return parseTesseractTsv(stdout, options);
+    return parseTesseractTsvObservations(stdout, options);
   } catch {
-    return [];
+    return { anchors: [], lines: [] };
   }
 }
 
 export function parseTesseractTsv(value, options = {}) {
+  return parseTesseractTsvObservations(value, options).anchors;
+}
+
+export function parseTesseractTsvObservations(value, options = {}) {
   const coordinateScale = Number(options.coordinateScale) || 1;
   const minimumConfidence = Number(options.minimumConfidence ?? 35);
   const rows = String(value || "").split(/\r?\n/).slice(1).map((line) => line.split("\t"));
@@ -241,19 +257,27 @@ export function parseTesseractTsv(value, options = {}) {
     line.confidence = Math.max(line.confidence, confidence);
     lines.set(key, line);
   }
-  return [...lines.values()].flatMap((line) => {
-    const text = line.words.join(" ");
-    const semantic = classifyComprehensivePlanningLabel(text);
+  const rawLines = [...lines.values()].map((line) => ({
+    text: line.words.join(" "),
+    xMin: line.xMin, yMin: line.yMin, xMax: line.xMax, yMax: line.yMax,
+    cx: (line.xMin + line.xMax) / 2,
+    cy: (line.yMin + line.yMax) / 2,
+    ocrConfidence: line.confidence / 100
+  }));
+  const anchors = rawLines.flatMap((line) => {
+    const sourceText = line.text;
+    const semantic = classifyComprehensivePlanningLabel(sourceText);
     if (!semantic) return [];
     return [{
-      text,
+      text: sourceText,
       xMin: line.xMin, yMin: line.yMin, xMax: line.xMax, yMax: line.yMax,
-      cx: (line.xMin + line.xMax) / 2,
-      cy: (line.yMin + line.yMax) / 2,
-      ocrConfidence: line.confidence / 100,
+      cx: line.cx,
+      cy: line.cy,
+      ocrConfidence: line.ocrConfidence,
       semantic
     }];
   });
+  return { anchors, lines: rawLines };
 }
 
 function mergeOcrAnchors(...groups) {
@@ -265,6 +289,17 @@ function mergeOcrAnchors(...groups) {
     anchors.push(anchor);
   }
   return anchors;
+}
+
+function mergeRawLines(...groups) {
+  const lines = [], seen = new Set();
+  for (const line of groups.flat()) {
+    const key = `${Math.round(line.cx)}:${Math.round(line.cy)}:${String(line.text).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(line);
+  }
+  return lines;
 }
 
 function positiveInteger(value, fallback) {

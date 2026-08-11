@@ -13,15 +13,6 @@ on:
           - legoland-windsor-resort
           - thorpe-park
           - drayton-manor-resort
-      planning_manifest:
-        description: Committed path or public HTTPS URL to a reviewed planning manifest
-        required: true
-        type: string
-      strict:
-        description: Refuse Minecraft output when evidence gates are not met
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -33,13 +24,13 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       PARK_ID: ${{ inputs.park }}
-      PLANNING_MANIFEST: ${{ inputs.planning_manifest }}
-      STRICT_MODE: ${{ inputs.strict }}
       OUTPUT_DIR: out/${{ inputs.park }}
       TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT }}
+      TPMAP_SHARED_CACHE_DIR: .tpmap-cache
+      TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
@@ -52,6 +43,16 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Restore planning discovery and derivative cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            .tpmap-cache/planning-discovery
+            .tpmap-cache/prepared-generator
+          key: planning-v2-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/planning-*.mjs', 'src/tools/planning_raster_vectorize.py') }}
+          restore-keys: |
+            planning-v2-${{ runner.os }}-${{ inputs.park }}-
+
       - name: Install geospatial and planning-drawing tools
         run: |
           sudo apt-get update
@@ -63,7 +64,7 @@ jobs:
       - name: Run test suite
         run: npm test
 
-      - name: Check required workflow configuration
+      - name: Check automatic-discovery configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -71,29 +72,23 @@ jobs:
             echo "Configure the TPMAP_CONTACT repository secret with a project URL or contact email." >&2
             exit 2
           fi
-          if [[ -z "${PLANNING_MANIFEST:-}" ]]; then
-            echo "A reviewed planning manifest is required." >&2
-            exit 2
-          fi
+          node src/cli.mjs parks | jq -e --arg park "$PARK_ID" '.[] | select(.id == $park and .planningDiscovery != null)' >/dev/null
 
-      - name: Build planning-authoritative Bedrock world
+      - name: Automatically discover planning evidence and build Bedrock world
         shell: bash
         run: |
           set -euo pipefail
           args=(
             build
             --park "$PARK_ID"
-            --planning-manifest "$PLANNING_MANIFEST"
             --planning-world-authority planning-only
             --contact "$TPMAP_CONTACT"
             --accuracy-mode verified
             --buildings shells
+            --strict
             --no-addon
             --out "$OUTPUT_DIR"
           )
-          if [[ "$STRICT_MODE" == "true" ]]; then
-            args+=(--strict)
-          fi
           node src/cli.mjs "${args[@]}"
 
       - name: Verify authority, provenance, labels, and world archive

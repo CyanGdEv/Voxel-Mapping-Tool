@@ -14,6 +14,10 @@ const MAX_DOCUMENT_BYTES = 250 * 1024 * 1024;
 export async function acquirePlanningEvidence(options, runtime) {
   const manifests = options.planningManifest || [];
   const directCollections = options.planning || [];
+  if (!manifests.length && !directCollections.length && options.parkProfile && !options.noAutoPlanning) {
+    const { acquireAutomaticPlanningEvidence } = await import("./planning-discovery.mjs");
+    return acquireAutomaticPlanningEvidence(options, runtime);
+  }
   const result = {
     schemaVersion: 1,
     status: manifests.length || directCollections.length ? "configured" : "not-configured",
@@ -73,11 +77,26 @@ export function compactPlanningEvidence(planning) {
   if (!planning) return null;
   return {
     schemaVersion: planning.schemaVersion,
+    automatic: planning.automatic === true,
+    parkId: planning.parkId || null,
     status: planning.status,
     featureCount: planning.featureCount,
     manifests: planning.manifests,
+    discovery: planning.discovery || null,
+    applications: (planning.applications || []).map((application) => ({
+      reference: application.reference || null,
+      address: application.address || null,
+      proposal: application.proposal || null,
+      status: application.status || null,
+      decision: application.decision || null,
+      decisionDate: application.decisionDate || null,
+      sourceUrl: application.sourceUrl || null,
+      discoveryProvider: application.discoveryProvider || null,
+      discoveryScore: application.discoveryScore || null
+    })),
     documents: planning.documents,
     warnings: planning.warnings,
+    failures: planning.failures || [],
     collections: planning.collections.map((entry) => ({
       id: entry.id,
       adapter: entry.adapter,
@@ -213,7 +232,7 @@ async function acquireDocument(document, base, manifest, runtime, options) {
   };
 }
 
-async function planningCollectionEntry(collection, context) {
+export async function planningCollectionEntry(collection, context) {
   if (collection?.type !== "FeatureCollection" || !Array.isArray(collection.features)) {
     throw new UserError(`Planning derivative ${context.id} must be a GeoJSON FeatureCollection`);
   }

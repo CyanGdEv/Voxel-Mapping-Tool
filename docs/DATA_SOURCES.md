@@ -12,7 +12,17 @@ The machine-readable catalogue is [`config/source-catalog.json`](../config/sourc
 | Thorpe Park | [Runnymede planning applications](https://www.runnymede.gov.uk/planning-permission/view-object-support-application-1) | Current and archived planning documents |
 | Drayton Manor | [Lichfield planning search](https://planning.lichfielddc.gov.uk/online-applications/search.do?action=simple) | Current and archived planning documents |
 
-Council registers are authoritative records, but their documents often need manual search, session handling and rights review. The workflow consumes reviewed manifests instead of pretending all portals provide a stable open API.
+Council registers and their drawings are the authoritative records. The automatic workflow uses Idox, legacy Idox and Northgate adapters plus official application seeds; it caches bounded responses and records access failures without bypassing council controls.
+
+## Automatic application discovery
+
+| Source | Use | Authority |
+|---|---|---|
+| [PlanIt API](https://www.planit.org.uk/api/) | Bounded spatial discovery, references, decisions and official source links | Discovery/index only; never world geometry |
+| Official council application pages | Application status, address, proposal and document list | Authoritative record metadata |
+| Official council PDFs/images | Layouts, elevations, materials, structures and landscape detail | World-authoritative only after automatic or reviewed eligibility gates |
+
+PlanIt prevents the workflow from depending on one council search form, but an application is useful for reconstruction only when its documents resolve back to an allowlisted official council host. The generated world never treats PlanIt, a search result, or OSM as planning geometry.
 
 ## National and environmental sources
 

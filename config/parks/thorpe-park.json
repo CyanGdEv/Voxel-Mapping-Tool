@@ -9,6 +9,16 @@
     "officialPortal": "https://www.runnymede.gov.uk/planning-permission/view-object-support-application-1",
     "searchTerms": ["Thorpe Park", "Staines Road", "KT16 8PN"]
   },
+  "planningDiscovery": {
+    "portalType": "northgate",
+    "searchUrl": "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
+    "allowedDocumentHosts": ["planning.runnymede.gov.uk"],
+    "seedApplicationUrls": [
+      "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?DAURI=PLANNING&PARAM0=322455&TYPE=PL%2FPlanningPK.xml&XSLT=%2FNorthgate%2FPlanningExplorer%2FSiteFiles%2FSkins%2FRunnymede_AA%2Fxslt%2FPL%2FPLDetails.xslt",
+      "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?DAURI=PLANNING&PARAM0=348466&TYPE=PL%2FPlanningPK.xml&XSLT=%2FPlanningPK.xml",
+      "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?DAURI=PLANNING&PARAM0=358753&TYPE=PL%2FPlanningPK.xml&XSLT=%2FPlanningPK.xml"
+    ]
+  },
   "defaults": {
     "elevation": "ea-lidar",
     "englandOpenData": true,

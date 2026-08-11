@@ -1,6 +1,8 @@
 # Planning manifest contract
 
-A manifest binds official planning records to reviewed georeferenced geometry. It is the hand-off between planning research and deterministic world generation.
+A manifest binds official planning records to reviewed georeferenced geometry. It is now an optional expert override: supported park builds automatically discover and process official records when neither `--planning-manifest` nor `--planning` is supplied.
+
+Use a manifest when an archive blocks automated access, a drawing needs specialist control points, or better CAD/survey geometry is available. Add `--no-auto-planning` to make that choice explicit.
 
 Validate documents against [`schemas/planning-manifest.schema.json`](../schemas/planning-manifest.schema.json).
 

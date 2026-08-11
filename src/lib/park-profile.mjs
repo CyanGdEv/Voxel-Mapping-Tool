@@ -61,6 +61,12 @@ export function validateParkProfile(profile, source = "park profile") {
   if (!profile.planningAuthority?.name || !profile.planningAuthority?.officialPortal) {
     throw new UserError(`${source} must identify the official planning authority and portal`);
   }
+  if (!profile.planningDiscovery?.portalType || !profile.planningDiscovery?.searchUrl) {
+    throw new UserError(`${source} must configure automatic planning discovery`);
+  }
+  if (!/^https:\/\//i.test(profile.planningDiscovery.searchUrl)) {
+    throw new UserError(`${source} planningDiscovery.searchUrl must use HTTPS`);
+  }
   return profile;
 }
 

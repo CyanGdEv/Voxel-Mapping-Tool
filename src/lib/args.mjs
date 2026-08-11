@@ -7,6 +7,8 @@ const VALUE_FLAGS = new Set([
   "ea-dtm-wcs-url", "ea-dsm-wcs-url", "ea-index-wfs-url", "override", "overture",
   "public-data", "source-fusion-tolerance-m", "source-config", "os-openmap-local",
   "planning", "planning-manifest", "planning-world-authority", "max-planning-document-mb",
+  "planit-url", "max-planning-applications", "max-planning-documents",
+  "max-planning-pages-per-document", "planning-georef-min-confidence",
   "planning-datasets", "planning-data-url", "trees-outside-woodland-url",
   "trees-outside-woodland-collection", "microsoft-buildings-index-url",
   "microsoft-buildings-min-confidence", "wikidata-url", "wikidata-limit",
@@ -49,7 +51,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-dsm", "no-ride-info-signs", "quiet", "england-open-data",
   "trees-outside-woodland", "planning-data", "microsoft-buildings",
   "wikidata-places", "wikimedia-commons", "open-aerial-map",
-  "strict-supplemental-sources"
+  "strict-supplemental-sources", "no-auto-planning"
 ]);
 
 export function parseArgs(argv) {
@@ -121,7 +123,8 @@ function normalize(options) {
     "shrubDensityPer100m2", "treeLineSpacingM", "vegetationMinSpacingM",
     "maxVegetationModels", "microsoftBuildingsMinConfidence", "wikidataLimit", "page",
     "wikimediaCommonsLimit", "maxSupplementalFeatures", "supplementalPageSize",
-    "maxSupplementalDownloadMb", "maxPlanningDocumentMb"
+    "maxSupplementalDownloadMb", "maxPlanningDocumentMb", "maxPlanningApplications",
+    "maxPlanningDocuments", "maxPlanningPagesPerDocument", "planningGeorefMinConfidence"
   ];
   for (const key of numberKeys) {
     if (options[key] === undefined) continue;
@@ -170,6 +173,19 @@ function normalize(options) {
   if (options.microsoftBuildingsMinConfidence !== undefined &&
     (options.microsoftBuildingsMinConfidence < 0 || options.microsoftBuildingsMinConfidence > 1)) {
     throw new UserError("--microsoft-buildings-min-confidence must be between 0 and 1");
+  }
+  for (const [key, minimum, maximum] of [
+    ["maxPlanningApplications", 1, 2000],
+    ["maxPlanningDocuments", 1, 500],
+    ["maxPlanningPagesPerDocument", 1, 50]
+  ]) {
+    if (options[key] !== undefined && (!Number.isInteger(options[key]) || options[key] < minimum || options[key] > maximum)) {
+      throw new UserError(`--${toKebab(key)} must be an integer between ${minimum} and ${maximum}`);
+    }
+  }
+  if (options.planningGeorefMinConfidence !== undefined &&
+    (options.planningGeorefMinConfidence < 0.5 || options.planningGeorefMinConfidence > 1)) {
+    throw new UserError("--planning-georef-min-confidence must be between 0.5 and 1");
   }
   for (const [key, minimum, maximum] of [
     ["wikidataLimit", 1, 2000], ["wikimediaCommonsLimit", 1, 500],
