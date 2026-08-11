@@ -15,7 +15,7 @@ import {
   extractDocumentLinks,
   extractDocumentPageLinks,
   parsePlanningApplicationPage,
-  scorePlanningApplication
+  classifyPlanningApplication
 } from "./planning-portal-html.mjs";
 import { planningCollectionEntry } from "./planning-manifest.mjs";
 
@@ -24,6 +24,7 @@ const DEFAULT_PLANIT = "https://www.planit.org.uk/api/applics/geojson";
 const MAX_APPLICATIONS_HARD = 2_000;
 const MAX_DOCUMENTS_HARD = 500;
 const MAX_PAGES_HARD = 50;
+const MAX_PLANIT_CANDIDATE_SCAN = 600;
 const APPLICATION_CRAWL_CONCURRENCY = 4;
 const DOCUMENT_PROCESS_CONCURRENCY = 3;
 const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
@@ -50,7 +51,7 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
   result.failures.push(...discovery.failures);
   result.warnings.push(...discovery.warnings);
   emitProgress(planningRuntime,
-    `Planning discovery: ${discovery.applications.length} relevant application(s) from ${discovery.summary.candidates} candidate(s)`);
+    `Planning discovery: ${discovery.applications.length}/${discovery.summary.relevantApplications} relevant application(s) selected from ${discovery.summary.candidates} candidate(s); ${discovery.summary.rejectedApplications} rejected before portal crawl`);
 
   const applications = discovery.applications.slice(0, limits.applications);
   const documentQueue = [];
@@ -147,7 +148,12 @@ export async function discoverPlanningApplications(profile, options = {}, runtim
   const deduped = new Map();
   for (const candidate of candidates) {
     const normalized = normalizeApplication(candidate);
-    normalized.discoveryScore = scorePlanningApplication(normalized, profile);
+    const triage = classifyPlanningApplication(normalized, profile);
+    normalized.discoveryScore = triage.score;
+    normalized.discoveryRelevant = triage.relevant;
+    normalized.discoverySiteMatch = triage.siteMatch;
+    normalized.discoveryCategories = triage.categories;
+    normalized.discoveryExcludedReason = triage.excludedReason;
     const keys = [
       applicationIdentity(normalized),
       normalized.sourceUrl ? applicationIdentity({ sourceUrl: normalized.sourceUrl }) : null
@@ -165,10 +171,12 @@ export async function discoverPlanningApplications(profile, options = {}, runtim
     if (previous) for (const [key, value] of deduped) if (value === previous) deduped.set(key, selected);
     for (const key of keys) deduped.set(key, selected);
   }
-  const applications = [...new Set(deduped.values())]
-    .filter((application) => application.discoveryScore >= 18 || application.discoveryProvider === "park-profile-official-seed")
+  const minimumApplicationScore = Number(profile.planningDiscovery.minimumApplicationScore ?? 180);
+  const uniqueApplications = [...new Set(deduped.values())];
+  const relevantApplications = uniqueApplications
+    .filter((application) => (application.discoveryRelevant && application.discoveryScore >= minimumApplicationScore) || application.discoveryProvider === "park-profile-official-seed")
     .sort((a, b) => b.discoveryScore - a.discoveryScore || String(a.reference).localeCompare(String(b.reference)))
-    .slice(0, limits.applications);
+  const applications = relevantApplications.slice(0, limits.applications);
   if (failures.length && applications.length) warnings.push("One or more discovery adapters failed; successful independent adapters were retained.");
   return {
     applications,
@@ -185,7 +193,12 @@ export async function discoverPlanningApplications(profile, options = {}, runtim
       officialSearchUrl: profile.planningDiscovery.searchUrl,
       portalType: profile.planningDiscovery.portalType,
       candidates: candidates.length,
+      triagedApplications: uniqueApplications.length,
+      relevantApplications: relevantApplications.length,
+      rejectedApplications: uniqueApplications.length - relevantApplications.length,
+      deferredApplications: relevantApplications.length - applications.length,
       applications: applications.length,
+      minimumApplicationScore,
       failures: failures.length
     }
   };
@@ -194,9 +207,10 @@ export async function discoverPlanningApplications(profile, options = {}, runtim
 async function discoverWithPlanIt(profile, options, runtime, limits) {
   const endpoint = options.planitUrl || DEFAULT_PLANIT;
   const bbox = profile.bbox;
-  const pageSize = Math.min(300, limits.applications);
+  const candidateLimit = Math.min(MAX_PLANIT_CANDIDATE_SCAN, Math.max(300, limits.applications * 2));
+  const pageSize = Math.min(300, candidateLimit);
   const applications = [];
-  for (let page = 1; applications.length < limits.applications; page += 1) {
+  for (let page = 1; applications.length < candidateLimit; page += 1) {
     const url = new URL(endpoint);
     url.searchParams.set("bbox", `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`);
     url.searchParams.set("pg_sz", String(pageSize));
@@ -213,6 +227,7 @@ async function discoverWithPlanIt(profile, options, runtime, limits) {
         })).data;
     const features = data?.features || [];
     for (const feature of features) {
+      if (applications.length >= candidateLimit) break;
       const properties = feature.properties || {};
       const other = properties.other_fields || {};
       applications.push({

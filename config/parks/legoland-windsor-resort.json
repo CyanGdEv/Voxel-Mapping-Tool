@@ -10,6 +10,7 @@
     "searchTerms": ["Legoland Windsor", "Winkfield Road", "SL4 4AY"]
   },
   "planningDiscovery": {
+    "siteIdentityTerms": ["LEGOLAND Windsor", "LEGOLAND Windsor Resort"],
     "portalType": "idox",
     "searchUrl": "https://publicaccess.rbwm.gov.uk/online-applications/search.do?action=simple",
     "allowedDocumentHosts": ["publicaccess.rbwm.gov.uk"],

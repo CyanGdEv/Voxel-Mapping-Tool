@@ -10,6 +10,7 @@
     "searchTerms": ["Thorpe Park", "Staines Road", "KT16 8PN"]
   },
   "planningDiscovery": {
+    "siteIdentityTerms": ["Thorpe Park", "Thorpe Park Resort"],
     "portalType": "northgate",
     "searchUrl": "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
     "allowedDocumentHosts": ["planning.runnymede.gov.uk", "docs.runnymede.gov.uk"],

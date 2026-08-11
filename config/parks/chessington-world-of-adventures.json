@@ -10,6 +10,7 @@
     "searchTerms": ["Chessington World of Adventures", "Leatherhead Road", "KT9 2NE"]
   },
   "planningDiscovery": {
+    "siteIdentityTerms": ["Chessington World of Adventures", "Chessington Zoo"],
     "portalType": "idox",
     "searchUrl": "https://publicaccess.kingston.gov.uk/online-applications/search.do?action=simple",
     "allowedDocumentHosts": ["publicaccess.kingston.gov.uk"]
