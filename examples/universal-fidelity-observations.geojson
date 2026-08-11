@@ -1,0 +1,80 @@
+{
+  "type": "FeatureCollection",
+  "name": "Portable high-fidelity observations",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "survey:path-main-plaza",
+        "replaces": "osm:way:123456",
+        "kind": "path",
+        "name": "Main Plaza",
+        "highway": "pedestrian",
+        "width": 8.4,
+        "surface": "paving_stones",
+        "surface:colour": "#a95c42",
+        "surface:pattern": "herringbone",
+        "verified": true,
+        "checked_at": "2026-08-02T00:00:00Z",
+        "source_name": "Licensed 20 cm orthophoto interpretation",
+        "source_url": "https://example.org/source-record",
+        "license": "Replace with the real source licence"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-1.00000, 52.00000],
+          [-0.99950, 52.00025]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "survey:footbridge-1",
+        "kind": "path",
+        "highway": "footway",
+        "bridge": "yes",
+        "bridge:structure": "boardwalk",
+        "bridge:deck:ele": 118.4,
+        "bridge:clearance": 2.6,
+        "width": 2.2,
+        "surface": "wood",
+        "surface:colour": "brown",
+        "verified": true,
+        "checked_at": "2026-08-02T00:00:00Z",
+        "source_name": "Open local bridge survey",
+        "source_url": "https://example.org/source-record",
+        "license": "Replace with the real source licence"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-1.00020, 52.00030],
+          [-0.99985, 52.00045]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "survey:tree-1",
+        "kind": "vegetation",
+        "natural": "tree",
+        "height_m": 14.2,
+        "diameter_crown": 8.5,
+        "leaf_type": "broadleaved",
+        "species": "Quercus robur",
+        "verified": true,
+        "checked_at": "2026-08-02T00:00:00Z",
+        "source_name": "Open canopy-height and crown segmentation",
+        "source_url": "https://example.org/source-record",
+        "license": "Replace with the real source licence"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-0.99970, 52.00010]
+      }
+    }
+  ]
+}

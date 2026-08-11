@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "alton-towers-resort",
+  "name": "Alton Towers Resort",
+  "aliases": ["Alton Towers", "ATR"],
+  "bbox": { "south": 52.9765, "west": -1.9130, "north": 53.0000, "east": -1.8700 },
+  "planningAuthority": {
+    "name": "Staffordshire Moorlands District Council",
+    "officialPortal": "https://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
+    "searchTerms": ["Alton Towers", "Farley Lane", "ST10 4DB"]
+  },
+  "defaults": {
+    "elevation": "ea-lidar",
+    "englandOpenData": true,
+    "treesOutsideWoodland": true,
+    "planningData": true,
+    "microsoftBuildings": true,
+    "wikidataPlaces": true,
+    "wikimediaCommons": true,
+    "openAerialMap": true,
+    "terrainDetailMode": "evidence",
+    "pathGeometryMode": "qa",
+    "pathDiscoveryMode": "qa",
+    "rideTerrainMode": "evidence",
+    "maxCells": 8000000,
+    "maxWorldChunks": 24000
+  }
+}

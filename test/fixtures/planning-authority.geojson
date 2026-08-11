@@ -1,0 +1,167 @@
+{
+  "type": "FeatureCollection",
+  "name": "Accepted fixture planning drawing",
+  "source": {
+    "name": "Fixture Planning Authority",
+    "url": "https://example.test/planning/APP-001",
+    "license": "fixture-only",
+    "dataset": "planning-drawing-vector"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:boundary",
+        "kind": "park_boundary",
+        "name": "Fixture Park",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Polygon", "coordinates": [[[-0.0015,51.0002],[0.0015,51.0002],[0.0015,51.0018],[-0.0015,51.0018],[-0.0015,51.0002]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:main-plaza",
+        "kind": "path",
+        "name": "Main Plaza",
+        "highway": "pedestrian",
+        "width": 8,
+        "surface_material": "red block paving",
+        "surface:pattern": "herringbone",
+        "minecraft_shape": "slab",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "LineString", "coordinates": [[0,51.0003],[0,51.0017]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:hall",
+        "kind": "building",
+        "building": "commercial",
+        "name": "Planning Hall",
+        "height_m": 9,
+        "elevation_m": 0,
+        "roof:shape": "gabled",
+        "roof:material": "deepslate",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Polygon", "coordinates": [[[-0.0012,51.00045],[-0.0007,51.00045],[-0.0007,51.00075],[-0.0012,51.00075],[-0.0012,51.00045]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:coaster",
+        "kind": "ride_track",
+        "roller_coaster": "track",
+        "name": "Planning Coaster",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "LineString", "coordinates": [[-0.0012,51.0009],[-0.0006,51.00065],[0.0006,51.0009],[0.0009,51.0014],[0.0001,51.0016],[-0.001,51.00125],[-0.0012,51.0009]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:support-1",
+        "kind": "ride_support",
+        "man_made": "ride_support",
+        "ride_ref": "planning:coaster",
+        "height_m": 8,
+        "support_style": "a-frame",
+        "support_material": "steel",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Point", "coordinates": [-0.0006,51.00065] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:service-hatch",
+        "kind": "detail",
+        "name": "Service Hatch",
+        "minecraft_shape": "trapdoor",
+        "minecraft_direction": 2,
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Point", "coordinates": [0.00025,51.00125] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:lake",
+        "kind": "water",
+        "natural": "water",
+        "name": "Planning Lake",
+        "elevation_m": 0,
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Polygon", "coordinates": [[[-0.0013,51.0014],[-0.0008,51.00135],[-0.0007,51.00165],[-0.00125,51.0017],[-0.0013,51.0014]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:tree-cover",
+        "kind": "vegetation",
+        "landcover": "trees",
+        "height_m": 12,
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "Polygon", "coordinates": [[[0.00045,51.0003],[0.00125,51.0003],[0.00125,51.0007],[0.00045,51.0007],[0.00045,51.0003]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:retaining-wall",
+        "kind": "barrier",
+        "barrier": "retaining_wall",
+        "material": "sandstone",
+        "height_m": 3,
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "LineString", "coordinates": [[0.0005,51.0011],[0.0012,51.0011]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "planning:temporary-red-fence",
+        "kind": "barrier",
+        "barrier": "fence",
+        "semantic_class": "construction-fence",
+        "planning_feature_state": "temporary",
+        "colour": "red",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "LineString", "coordinates": [[-0.0004,51.0010],[0.0004,51.0010]] }
+    }
+  ]
+}

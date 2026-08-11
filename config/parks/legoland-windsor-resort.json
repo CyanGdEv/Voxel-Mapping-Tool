@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "legoland-windsor-resort",
+  "name": "LEGOLAND Windsor Resort",
+  "aliases": ["Legoland Windsor", "LEGOLAND"],
+  "bbox": { "south": 51.4560, "west": -0.6650, "north": 51.4720, "east": -0.6360 },
+  "planningAuthority": {
+    "name": "Royal Borough of Windsor and Maidenhead",
+    "officialPortal": "https://www.rbwm.gov.uk/planning-and-building-control/find-planning-application",
+    "searchTerms": ["Legoland Windsor", "Winkfield Road", "SL4 4AY"]
+  },
+  "defaults": {
+    "elevation": "ea-lidar",
+    "englandOpenData": true,
+    "treesOutsideWoodland": true,
+    "planningData": true,
+    "microsoftBuildings": true,
+    "wikidataPlaces": true,
+    "wikimediaCommons": true,
+    "openAerialMap": true,
+    "terrainDetailMode": "evidence",
+    "pathGeometryMode": "qa",
+    "pathDiscoveryMode": "qa",
+    "rideTerrainMode": "evidence",
+    "maxCells": 6000000,
+    "maxWorldChunks": 20000
+  }
+}

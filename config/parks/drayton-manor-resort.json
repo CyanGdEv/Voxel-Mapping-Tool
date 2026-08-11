@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "drayton-manor-resort",
+  "name": "Drayton Manor Resort",
+  "aliases": ["Drayton Manor", "DMR"],
+  "bbox": { "south": 52.6020, "west": -1.7240, "north": 52.6185, "east": -1.7000 },
+  "planningAuthority": {
+    "name": "Lichfield District Council",
+    "officialPortal": "https://planning.lichfielddc.gov.uk/online-applications/search.do?action=simple",
+    "searchTerms": ["Drayton Manor Park", "Drayton Bassett", "B78 3TW"]
+  },
+  "defaults": {
+    "elevation": "ea-lidar",
+    "englandOpenData": true,
+    "treesOutsideWoodland": true,
+    "planningData": true,
+    "microsoftBuildings": true,
+    "wikidataPlaces": true,
+    "wikimediaCommons": true,
+    "openAerialMap": true,
+    "terrainDetailMode": "evidence",
+    "pathGeometryMode": "qa",
+    "pathDiscoveryMode": "qa",
+    "rideTerrainMode": "evidence",
+    "maxCells": 6000000,
+    "maxWorldChunks": 20000
+  }
+}

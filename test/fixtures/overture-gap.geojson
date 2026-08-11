@@ -1,0 +1,50 @@
+{
+  "type": "FeatureCollection",
+  "name": "Synthetic Overture-schema source-fusion fixture",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "synthetic-duplicate-main-avenue",
+        "theme": "transportation",
+        "type": "segment",
+        "subtype": "road",
+        "class": "footway",
+        "names": { "primary": "Main Avenue" },
+        "version": 1,
+        "sources": [{
+          "dataset": "Synthetic regression geometry",
+          "record_id": "fixture-duplicate",
+          "update_time": "2026-08-02T00:00:00Z"
+        }]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[0, 51.0003], [0, 51.0017]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "synthetic-gap-footway",
+        "theme": "transportation",
+        "type": "segment",
+        "subtype": "road",
+        "class": "footway",
+        "names": { "primary": "Source-Fused Gap Path" },
+        "road_surface": [{ "value": "compacted", "between": null }],
+        "width_rules": [{ "value": 2.5, "between": null }],
+        "version": 1,
+        "sources": [{
+          "dataset": "Synthetic regression geometry",
+          "record_id": "fixture-gap",
+          "update_time": "2026-08-02T00:00:00Z"
+        }]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-0.00138, 51.0009], [-0.00138, 51.00118]]
+      }
+    }
+  ]
+}

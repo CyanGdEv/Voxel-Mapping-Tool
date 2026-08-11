@@ -1,0 +1,75 @@
+{
+  "type": "FeatureCollection",
+  "name": "Synthetic public-terrain schema demonstration",
+  "source": {
+    "name": "Synthetic ThemePark Map terrain fixture",
+    "url": "https://example.test/themepark-map/public-terrain-fixture",
+    "license": "CC0-1.0",
+    "checked_at": "2026-08-02"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "public:path:dirt-example",
+        "kind": "path",
+        "subtype": "footway",
+        "name": "Observed earth path",
+        "highway": "footway",
+        "surface": "ground",
+        "width": 2.5,
+        "accuracy_m": 1,
+        "verified": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-0.0013, 51.00032], [-0.0004, 51.00032]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "public:rock:dimensioned-example",
+        "kind": "terrain_detail",
+        "subtype": "boulder",
+        "natural": "boulder",
+        "height_m": 2.2,
+        "diameter_m": 3.4,
+        "accuracy_m": 0.5,
+        "verified": true
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [0.00125, 51.00095]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "public:cliff:example",
+        "kind": "terrain_detail",
+        "subtype": "cliff",
+        "natural": "cliff",
+        "accuracy_m": 1.5
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[0.00135, 51.00075], [0.00135, 51.00115]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "public:surface:bare-rock-example",
+        "kind": "surface",
+        "subtype": "bare_rock",
+        "natural": "bare_rock",
+        "accuracy_m": 2
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0.00045, 51.00072], [0.00125, 51.00072], [0.00125, 51.00102], [0.00045, 51.00102], [0.00045, 51.00072]]]
+      }
+    }
+  ]
+}

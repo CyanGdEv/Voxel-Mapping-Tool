@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "thorpe-park",
+  "name": "Thorpe Park Resort",
+  "aliases": ["Thorpe Park", "TPR"],
+  "bbox": { "south": 51.3960, "west": -0.5260, "north": 51.4130, "east": -0.4970 },
+  "planningAuthority": {
+    "name": "Runnymede Borough Council",
+    "officialPortal": "https://www.runnymede.gov.uk/planning-permission/view-object-support-application-1",
+    "searchTerms": ["Thorpe Park", "Staines Road", "KT16 8PN"]
+  },
+  "defaults": {
+    "elevation": "ea-lidar",
+    "englandOpenData": true,
+    "treesOutsideWoodland": true,
+    "planningData": true,
+    "microsoftBuildings": true,
+    "wikidataPlaces": true,
+    "wikimediaCommons": true,
+    "openAerialMap": true,
+    "terrainDetailMode": "evidence",
+    "pathGeometryMode": "qa",
+    "pathDiscoveryMode": "qa",
+    "rideTerrainMode": "evidence",
+    "maxCells": 6000000,
+    "maxWorldChunks": 20000
+  }
+}

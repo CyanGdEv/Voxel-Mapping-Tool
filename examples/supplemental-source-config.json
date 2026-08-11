@@ -1,0 +1,30 @@
+{
+  "sources": [
+    {
+      "id": "park-authority-buildings",
+      "type": "ogc-api-features",
+      "url": "https://example.gov/ogc/features/v1",
+      "collection": "buildings",
+      "provider": "Example local authority",
+      "sourceUrl": "https://example.gov/datasets/buildings",
+      "license": "Open Government Licence v3.0",
+      "dataset": "Authoritative building footprints",
+      "kind": "building",
+      "subtype": "authority-building",
+      "heightProperties": ["height_m", "measured_height"],
+      "mergePolicy": "gap-fill"
+    },
+    {
+      "id": "park-planning-layer",
+      "type": "arcgis-feature-layer",
+      "url": "https://services.example.gov/arcgis/rest/services/Park/FeatureServer/0",
+      "provider": "Example planning authority",
+      "sourceUrl": "https://example.gov/open-data/park",
+      "license": "Open Government Licence v3.0",
+      "dataset": "Park planning layer",
+      "kindProperty": "kind",
+      "subtypeProperty": "asset_type",
+      "mergePolicy": "independent-detail"
+    }
+  ]
+}
