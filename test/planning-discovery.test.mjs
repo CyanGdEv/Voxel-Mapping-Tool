@@ -13,6 +13,7 @@ import {
   classifyPlanningDocument,
   extractApplicationLinks,
   extractDocumentLinks,
+  extractDocumentPageLinks,
   parsePlanningApplicationPage
 } from "../src/lib/planning-portal-html.mjs";
 import { classifyComprehensivePlanningLabel } from "../src/lib/planning-comprehensive-semantics.mjs";
@@ -109,6 +110,38 @@ test("legacy Idox AppBlobImage links become allowlisted integrity-checkable docu
   assert.equal(application.easting, null);
 });
 
+test("Northgate document-list links decode hexadecimal entities and NEC document models", () => {
+  const northgate = "https://planning.runnymede.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx";
+  const details = `<a href="&#xD;&#xA;https://docs.runnymede.gov.uk/PublicAccess_LIVE/SearchResult/RunThirdPartySearch?FileSystemId=PL&amp;FOLDER1_REF=RU.21/2180">View Documents</a>`;
+  const pages = extractDocumentLinks(details, northgate, ["docs.runnymede.gov.uk"]);
+  assert.equal(pages.length, 0, "a document-list page must not be mistaken for a PDF");
+  assert.equal(extractDocumentPageLinks(details, northgate, ["docs.runnymede.gov.uk"])[0].url,
+    "https://docs.runnymede.gov.uk/PublicAccess_LIVE/SearchResult/RunThirdPartySearch?FileSystemId=PL&FOLDER1_REF=RU.21/2180");
+
+  const listPage = `<script>var model ={"Rows":[
+    {"Guid":"967DFF22E4FE4DF1BBA45E8BC5BE2448","Doc_Type":"Plan","Doc_Ref2":"Proposed ride layout and elevations"},
+    {"Guid":"21C011E4B42A47A79907C8DA2D527315","Doc_Type":"Consultation Response","Doc_Ref2":"Natural England"}
+  ]};</script>`;
+  const documents = extractDocumentLinks(listPage,
+    "https://docs.runnymede.gov.uk/PublicAccess_LIVE/SearchResult/RunThirdPartySearch?FileSystemId=PL",
+    ["docs.runnymede.gov.uk"]);
+  assert.equal(documents.length, 2);
+  assert.equal(documents[0].url,
+    "https://docs.runnymede.gov.uk/PublicAccess_Live/Document/ViewDocument?id=967DFF22E4FE4DF1BBA45E8BC5BE2448");
+  assert.equal(documents[0].role, "ride-layout-and-structure");
+  assert.equal(documents[0].relevant, true);
+  assert.equal(documents[1].relevant, false);
+});
+
+test("document tabs and table sort links are never downloaded as drawing files", () => {
+  const base = "https://planning.example/online-applications/applicationDetails.do?keyVal=ABC";
+  const html = `<a href="applicationDetails.do?activeTab=documents&amp;keyVal=ABC">Documents</a>
+    <a href="applicationDetails.do?activeTab=documents&amp;keyVal=ABC&amp;documentOrdering.orderBy=date">Date published</a>
+    <a href="files/ABC/pdf/site-layout.pdf">Site layout</a>`;
+  const documents = extractDocumentLinks(html, base, ["planning.example"]);
+  assert.deepEqual(documents.map((item) => item.title), ["Site layout"]);
+});
+
 test("automatic discovery merges PlanIt spatial results with official portal search and removes unrelated records", async () => {
   const planit = {
     type: "FeatureCollection",
@@ -147,6 +180,30 @@ test("automatic discovery merges PlanIt spatial results with official portal sea
   assert.equal(result.applications[0].reference, "25/0042/FUL");
   assert.equal(result.summary.mode, "automatic-park-selection");
   assert.equal(result.failures.length, 0);
+});
+
+test("PlanIt raw URLs cannot bypass a park's official-host allowlist", async () => {
+  const result = await discoverPlanningApplications(profile, { maxPlanningApplications: 20 }, {
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => ({
+      type: "FeatureCollection",
+      total: 1,
+      features: [{
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [0, 51.01] },
+        properties: {
+          reference: "25/0043/CNA",
+          address: "Fixture Park FP1 1AA",
+          description: "Existing ride consultation",
+          url: "https://neighbouring-council.example/applicationDetails.do?keyVal=FOREIGN"
+        }
+      }]
+    }),
+    fetchText: async () => ""
+  });
+  assert.equal(result.applications.length, 1);
+  assert.equal(result.applications[0].sourceUrl, null);
 });
 
 test("blocked discovery services produce diagnostics instead of silently substituting map geometry", async () => {

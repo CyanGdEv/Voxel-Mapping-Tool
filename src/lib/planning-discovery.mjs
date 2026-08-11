@@ -536,7 +536,9 @@ function normalizeApplication(application) {
     reference: application.reference || application.altid || application.uid || null,
     address: application.address || application.location || null,
     proposal: application.proposal || application.description || null,
-    sourceUrl: application.sourceUrl || application.url || null
+    sourceUrl: Object.hasOwn(application, "sourceUrl")
+      ? application.sourceUrl
+      : application.url || null
   };
 }
 
