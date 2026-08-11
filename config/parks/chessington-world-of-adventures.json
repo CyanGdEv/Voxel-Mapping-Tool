@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "chessington-world-of-adventures",
+  "name": "Chessington World of Adventures Resort",
+  "aliases": ["Chessington", "CWOA"],
+  "bbox": { "south": 51.3415, "west": -0.3275, "north": 51.3565, "east": -0.3050 },
+  "planningAuthority": {
+    "name": "Royal Borough of Kingston upon Thames",
+    "officialPortal": "https://www.kingston.gov.uk/planning-and-building-control/planning-applications/search-or-comment",
+    "searchTerms": ["Chessington World of Adventures", "Leatherhead Road", "KT9 2NE"]
+  },
+  "defaults": {
+    "elevation": "ea-lidar",
+    "englandOpenData": true,
+    "treesOutsideWoodland": true,
+    "planningData": true,
+    "microsoftBuildings": true,
+    "wikidataPlaces": true,
+    "wikimediaCommons": true,
+    "openAerialMap": true,
+    "terrainDetailMode": "evidence",
+    "pathGeometryMode": "qa",
+    "pathDiscoveryMode": "qa",
+    "rideTerrainMode": "evidence",
+    "maxCells": 6000000,
+    "maxWorldChunks": 20000
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "example-park-current-state",
+  "parkId": "thorpe-park",
+  "authority": {
+    "name": "Runnymede Borough Council",
+    "officialPortal": "https://www.runnymede.gov.uk/planning-permission/view-object-support-application-1"
+  },
+  "reviewedAt": "2026-08-11",
+  "documents": [
+    {
+      "id": "example-implemented-layout",
+      "applicationReference": "REPLACE-WITH-REFERENCE",
+      "applicationStatus": "implemented",
+      "role": "approved-site-layout",
+      "sourceUrl": "https://planning-authority.example/document.pdf",
+      "mime": "application/pdf",
+      "acquire": false,
+      "reuseStatus": "public-register-processing-only",
+      "derivedGeojson": "derived/example-implemented-layout.geojson",
+      "worldEligible": true,
+      "worldEligibilityBasis": "Replace with dated evidence that the layout was built and remains present."
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "survey:example-station",
+        "replaces": "osm:way:123456",
+        "name": "Example Station",
+        "kind": "building",
+        "subtype": "coaster_station",
+        "height_m": 8.4,
+        "verified": true,
+        "checked_at": "2026-08-02T00:00:00Z",
+        "source_name": "Local authority open survey",
+        "source_url": "https://example.gov/open-data/station-survey",
+        "license": "Example open-data licence"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-1.00010, 52.00010],
+          [-1.00000, 52.00010],
+          [-1.00000, 52.00020],
+          [-1.00010, 52.00020],
+          [-1.00010, 52.00010]
+        ]]
+      }
+    }
+  ]
+}

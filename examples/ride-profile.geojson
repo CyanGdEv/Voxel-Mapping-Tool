@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "verified:example-coaster:centreline",
+        "ride_name": "Example Coaster",
+        "subtype": "coaster",
+        "replaces": "osm:way:123456789",
+        "elevation_datum": "ODN",
+        "evidence": "planning-verified",
+        "evidence_by_vertex": [
+          "planning-verified",
+          "planning-verified",
+          "interpolated",
+          "planning-verified"
+        ],
+        "confidence_by_vertex": [0.94, 0.94, 0.72, 0.94],
+        "banking_deg": [0, 12.5, null, -8],
+        "source_name": "Example approved planning drawing",
+        "source_url": "https://example.gov/planning/drawing-001",
+        "checked_at": "2026-08-02",
+        "license": "Open Government Licence v3.0",
+        "method": "Centreline digitised from dimensioned plan and elevation sheets",
+        "validation": "Illustrative schema example only; coordinates are not a real ride."
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-1.89000, 52.99000, 151.2],
+          [-1.88990, 52.99005, 154.8],
+          [-1.88980, 52.99010, 158.1],
+          [-1.88970, 52.99015, 153.6]
+        ]
+      }
+    }
+  ]
+}

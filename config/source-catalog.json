@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-11",
+  "authorityPolicy": "Planning derivatives define world geometry; OSM is alignment-only.",
+  "sources": [
+    {
+      "id": "official-planning-registers",
+      "name": "Official local planning authority registers",
+      "role": ["ride-layout", "support-style", "buildings", "paths", "plazas", "materials", "walls", "fences", "levels", "archives"],
+      "authority": "world-authoritative-after-review",
+      "integration": "planning-manifest",
+      "reuse": "document-specific; public viewing is not redistribution permission"
+    },
+    {
+      "id": "planning-data-gov-uk",
+      "name": "Planning Data",
+      "url": "https://www.planning.data.gov.uk/docs",
+      "role": ["designations", "trees", "listed-buildings", "planning-entity-discovery"],
+      "authority": "supplemental-evidence",
+      "integration": "bounded-api-adapter",
+      "license": "Open Government Licence v3.0 where dataset metadata states it"
+    },
+    {
+      "id": "ea-lidar-dtm-1m",
+      "name": "Environment Agency LIDAR Composite DTM 1m",
+      "url": "https://environment.data.gov.uk/dataset/13787b9a-26a4-4775-8523-806d13af58fc",
+      "role": ["terrain", "ground-elevation", "cut-fill", "support-footings"],
+      "authority": "vertical-evidence",
+      "integration": "ea-lidar-and-geotiff"
+    },
+    {
+      "id": "ea-lidar-dsm-1m",
+      "name": "Environment Agency LIDAR Composite DSM 1m",
+      "url": "https://environment.data.gov.uk/dataset/9ba4d5ac-d596-445a-9056-dae3ddec0178",
+      "role": ["roof-elevation", "canopy-height", "surface-height", "ride-candidate-height"],
+      "authority": "vertical-evidence",
+      "integration": "ea-lidar-and-geotiff"
+    },
+    {
+      "id": "ea-survey-download",
+      "name": "Defra Survey Data Download",
+      "url": "https://environment.data.gov.uk/survey",
+      "role": ["lidar-discovery", "aerial-discovery"],
+      "authority": "source-catalogue",
+      "integration": "manual-or-generic-input"
+    },
+    {
+      "id": "ea-vertical-aerial",
+      "name": "Environment Agency vertical aerial photography",
+      "url": "https://environment.data.gov.uk/dataset/dae203a8-ba24-4c54-bab0-866b9faadb58",
+      "role": ["path-width", "surface-colour", "surface-pattern", "canopy", "qa"],
+      "authority": "rights-cleared-image-evidence",
+      "integration": "orthophoto-geotiff"
+    },
+    {
+      "id": "national-trees-outside-woodland",
+      "name": "National Trees Outside Woodland map",
+      "url": "https://www.data.gov.uk/dataset/171f673a-8491-4517-a56b-5f0fc7d65044/national-trees-outside-woodland-map",
+      "role": ["tree-crowns", "tree-groups", "small-woodland"],
+      "authority": "vegetation-evidence",
+      "integration": "bounded-api-adapter"
+    },
+    {
+      "id": "os-open-data",
+      "name": "Ordnance Survey OpenData",
+      "url": "https://www.ordnancesurvey.co.uk/products/open-data",
+      "role": ["official-open-mapping", "water", "buildings", "transport"],
+      "authority": "supplemental-independent-observation",
+      "integration": "local-geojson-or-source-config"
+    },
+    {
+      "id": "openstreetmap",
+      "name": "OpenStreetMap",
+      "url": "https://www.openstreetmap.org/copyright",
+      "role": ["registration", "alignment", "discovery", "qa"],
+      "authority": "alignment-only",
+      "integration": "bounded-overpass",
+      "worldEligible": false
+    },
+    {
+      "id": "overture-maps",
+      "name": "Overture Maps Foundation",
+      "url": "https://docs.overturemaps.org/getting-data/",
+      "role": ["registration", "gap-qa"],
+      "authority": "osm-derived-alignment-only",
+      "integration": "local-geojson",
+      "worldEligible": false
+    },
+    {
+      "id": "microsoft-global-ml-buildings",
+      "name": "Microsoft Global ML Building Footprints",
+      "url": "https://github.com/microsoft/GlobalMLBuildingFootprints",
+      "role": ["building-gap-review"],
+      "authority": "machine-learning-supplemental",
+      "integration": "bounded-partition-adapter"
+    },
+    {
+      "id": "wikidata",
+      "name": "Wikidata",
+      "url": "https://www.wikidata.org/wiki/Wikidata:Data_access",
+      "role": ["attraction-labels", "place-metadata"],
+      "authority": "semantic-supplemental",
+      "integration": "bounded-sparql-adapter"
+    },
+    {
+      "id": "wikimedia-commons",
+      "name": "Wikimedia Commons",
+      "url": "https://commons.wikimedia.org/wiki/Commons:API",
+      "role": ["dated-photo-metadata", "visual-review"],
+      "authority": "item-license-specific-evidence",
+      "integration": "bounded-metadata-adapter"
+    },
+    {
+      "id": "open-aerial-map",
+      "name": "OpenAerialMap",
+      "url": "https://openaerialmap.org/",
+      "role": ["open-imagery-discovery"],
+      "authority": "image-license-specific-evidence",
+      "integration": "bounded-candidate-adapter"
+    },
+    {
+      "id": "living-england",
+      "name": "Living England habitat map",
+      "url": "https://environment.data.gov.uk/dataset/042f14b2-3076-420d-b604-9657c0398fae",
+      "role": ["habitat", "land-cover-corroboration"],
+      "authority": "supplemental-evidence",
+      "integration": "catalogued-generic-input"
+    },
+    {
+      "id": "ea-water-framework-directive",
+      "name": "Environment Agency Water Framework Directive data",
+      "url": "https://environment.data.gov.uk/dataset/6436bedb-af10-4fd3-847c-66a91f63799c",
+      "role": ["water-context"],
+      "authority": "supplemental-evidence",
+      "integration": "catalogued-generic-input"
+    },
+    {
+      "id": "historic-england",
+      "name": "Historic England open data",
+      "url": "https://historicengland.org.uk/listing/the-list/data-downloads/",
+      "role": ["listed-buildings", "heritage-context"],
+      "authority": "supplemental-evidence",
+      "integration": "catalogued-generic-input"
+    },
+    {
+      "id": "bgs-opengeoscience",
+      "name": "BGS OpenGeoscience",
+      "url": "https://www.bgs.ac.uk/geological-data/opengeoscience/",
+      "role": ["geology", "ground-context"],
+      "authority": "supplemental-evidence",
+      "integration": "catalogued-generic-input"
+    },
+    {
+      "id": "copernicus-data-space",
+      "name": "Copernicus Data Space Ecosystem",
+      "url": "https://documentation.dataspace.copernicus.eu/APIs.html",
+      "role": ["satellite", "imagery", "elevation-discovery"],
+      "authority": "supplemental-evidence",
+      "integration": "catalogued-dataset-specific"
+    },
+    {
+      "id": "esa-worldcover",
+      "name": "ESA WorldCover",
+      "url": "https://esa-worldcover.org/en/data-access",
+      "role": ["regional-land-cover"],
+      "authority": "coarse-corroboration-only",
+      "integration": "catalogued-generic-input"
+    }
+  ]
+}

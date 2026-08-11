@@ -1,0 +1,7 @@
+node_modules/
+out/
+.tpmap-cache*/
+__pycache__/
+*.pyc
+*.mcaddon
+*.mcworld

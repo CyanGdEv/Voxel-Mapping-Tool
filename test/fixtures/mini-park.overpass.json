@@ -1,0 +1,143 @@
+{
+  "version": 0.6,
+  "generator": "ThemePark Map test fixture",
+  "elements": [
+    {
+      "type": "way",
+      "id": 100,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 4,
+      "tags": { "tourism": "theme_park", "name": "Fixture Park" },
+      "geometry": [
+        { "lat": 51.0002, "lon": -0.0015 },
+        { "lat": 51.0002, "lon": 0.0015 },
+        { "lat": 51.0018, "lon": 0.0015 },
+        { "lat": 51.0018, "lon": -0.0015 },
+        { "lat": 51.0002, "lon": -0.0015 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 101,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 2,
+      "tags": { "highway": "footway", "width": "3", "name": "Main Avenue" },
+      "geometry": [
+        { "lat": 51.0003, "lon": 0.0 },
+        { "lat": 51.0017, "lon": 0.0 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 102,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 3,
+      "tags": { "building": "commercial", "height": "9 m", "name": "Verified Hall" },
+      "geometry": [
+        { "lat": 51.00045, "lon": -0.0012 },
+        { "lat": 51.00045, "lon": -0.0007 },
+        { "lat": 51.00075, "lon": -0.0007 },
+        { "lat": 51.00075, "lon": -0.0012 },
+        { "lat": 51.00045, "lon": -0.0012 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 103,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 1,
+      "tags": { "building": "kiosk", "name": "Unknown Height Kiosk" },
+      "geometry": [
+        { "lat": 51.00125, "lon": 0.0007 },
+        { "lat": 51.00125, "lon": 0.0010 },
+        { "lat": 51.00145, "lon": 0.0010 },
+        { "lat": 51.00145, "lon": 0.0007 },
+        { "lat": 51.00125, "lon": 0.0007 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 104,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 6,
+      "tags": { "roller_coaster": "track", "name": "Evidence Coaster" },
+      "geometry": [
+        { "lat": 51.0009, "lon": -0.0012 },
+        { "lat": 51.00065, "lon": -0.0006 },
+        { "lat": 51.0009, "lon": 0.0006 },
+        { "lat": 51.0014, "lon": 0.0009 },
+        { "lat": 51.0016, "lon": 0.0001 },
+        { "lat": 51.00125, "lon": -0.0010 },
+        { "lat": 51.0009, "lon": -0.0012 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 105,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 2,
+      "tags": { "natural": "water", "name": "Lake" },
+      "geometry": [
+        { "lat": 51.0014, "lon": -0.0013 },
+        { "lat": 51.00135, "lon": -0.0008 },
+        { "lat": 51.00165, "lon": -0.0007 },
+        { "lat": 51.0017, "lon": -0.00125 },
+        { "lat": 51.0014, "lon": -0.0013 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 106,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 2,
+      "tags": { "leisure": "garden", "name": "Gardens" },
+      "geometry": [
+        { "lat": 51.0003, "lon": 0.0004 },
+        { "lat": 51.0003, "lon": 0.0013 },
+        { "lat": 51.00075, "lon": 0.0013 },
+        { "lat": 51.00075, "lon": 0.0004 },
+        { "lat": 51.0003, "lon": 0.0004 }
+      ]
+    },
+    {
+      "type": "node",
+      "id": 107,
+      "lat": 51.00105,
+      "lon": 0.00115,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 1,
+      "tags": { "attraction": "carousel", "name": "Carousel" }
+    },
+    {
+      "type": "way",
+      "id": 108,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 2,
+      "tags": { "barrier": "fence" },
+      "geometry": [
+        { "lat": 51.00035, "lon": -0.00045 },
+        { "lat": 51.00065, "lon": -0.00045 }
+      ]
+    },
+    {
+      "type": "way",
+      "id": 109,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 1,
+      "tags": { "barrier": "fence", "name": "Boundary-crossing source geometry" },
+      "geometry": [
+        { "lat": 51.00100, "lon": 0.00140 },
+        { "lat": 51.00100, "lon": 0.03000 }
+      ]
+    },
+    {
+      "type": "node",
+      "id": 110,
+      "lat": 51.00045,
+      "lon": -0.00095,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "version": 1,
+      "tags": { "entrance": "main" }
+    }
+  ]
+}

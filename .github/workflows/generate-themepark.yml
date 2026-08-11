@@ -1,0 +1,131 @@
+name: Generate 1:1 theme park
+
+on:
+  workflow_dispatch:
+    inputs:
+      park:
+        description: Supported park profile
+        required: true
+        type: choice
+        options:
+          - chessington-world-of-adventures
+          - alton-towers-resort
+          - legoland-windsor-resort
+          - thorpe-park
+          - drayton-manor-resort
+      planning_manifest:
+        description: Committed path or public HTTPS URL to a reviewed planning manifest
+        required: true
+        type: string
+      strict:
+        description: Refuse Minecraft output when evidence gates are not met
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voxel-map-${{ inputs.park }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      PARK_ID: ${{ inputs.park }}
+      PLANNING_MANIFEST: ${{ inputs.planning_manifest }}
+      STRICT_MODE: ${{ inputs.strict }}
+      OUTPUT_DIR: out/${{ inputs.park }}
+      TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install geospatial and planning-drawing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gdal-bin poppler-utils python3-opencv tesseract-ocr
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Check required workflow configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${TPMAP_CONTACT:-}" ]]; then
+            echo "Configure the TPMAP_CONTACT repository secret with a project URL or contact email." >&2
+            exit 2
+          fi
+          if [[ -z "${PLANNING_MANIFEST:-}" ]]; then
+            echo "A reviewed planning manifest is required." >&2
+            exit 2
+          fi
+
+      - name: Build planning-authoritative Bedrock world
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            build
+            --park "$PARK_ID"
+            --planning-manifest "$PLANNING_MANIFEST"
+            --planning-world-authority planning-only
+            --contact "$TPMAP_CONTACT"
+            --accuracy-mode verified
+            --buildings shells
+            --no-addon
+            --out "$OUTPUT_DIR"
+          )
+          if [[ "$STRICT_MODE" == "true" ]]; then
+            args+=(--strict)
+          fi
+          node src/cli.mjs "${args[@]}"
+
+      - name: Verify authority, provenance, labels, and world archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-planning-build.mjs --directory "$OUTPUT_DIR"
+          world_file="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.mcworld' -print -quit)"
+          test -n "$world_file"
+          geojson_file="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.geojson' ! -name '*-qa.geojson' -print -quit)"
+          node scripts/validate-world.mjs \
+            --world "$world_file" \
+            --manifest "$OUTPUT_DIR/world-manifest.json" \
+            --labels "$OUTPUT_DIR/building-labels.json" \
+            --geojson "$geojson_file" \
+            --out "$OUTPUT_DIR/world-validation.json" \
+            --markdown "$OUTPUT_DIR/WORLD_VALIDATION.md"
+
+      - name: Upload importable .mcworld directly
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.OUTPUT_DIR }}/*.mcworld
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload evidence and validation bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-${{ inputs.park }}-${{ github.run_number }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/**
+            !${{ env.OUTPUT_DIR }}/*.mcworld
+          if-no-files-found: error
+          retention-days: 90
