@@ -88,6 +88,9 @@ jobs:
             --no-addon
             --out "$OUTPUT_DIR"
           )
+          if [[ "$PARK_ID" == "alton-towers-resort" ]]; then
+            args+=(--max-planning-applications 6)
+          fi
           node src/cli.mjs "${args[@]}"
 
       - name: Save acquired sources and planning derivatives
