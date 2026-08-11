@@ -14,12 +14,6 @@
     "siteIdentityTerms": ["Alton Towers", "Alton Towers Resort", "Splash Landings Hotel"],
     "searchUrl": "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet",
     "allowedDocumentHosts": ["publicaccess.staffsmoorlands.gov.uk"],
-    "priorityApplicationUrls": [
-      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=104356",
-      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=111996",
-      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=47714",
-      "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=47715"
-    ],
     "seedApplicationUrls": [
       "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=157904",
       "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=12676",
