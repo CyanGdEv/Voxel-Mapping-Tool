@@ -31,6 +31,19 @@ test("appearance and high-fidelity tree palettes are accepted by the direct-worl
   const unsupported = [...emitted].filter((b) => !allowed.has(b)).sort();
   assert.deepEqual(unsupported, []);
 });
+test("live vegetation compiler routes mapped and aerial trees through high-fidelity generator", async () => {
+  const raster = await readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8");
+  assert.ok(
+    raster.includes('import { compileHighFidelityTreeModel } from "./tree-generator.mjs";'),
+    "raster compiler must import the high-fidelity tree engine"
+  );
+  const calls = raster.match(/compileHighFidelityTreeModel\s*\(\s*\{/g) || [];
+  assert.ok(calls.length >= 2, "mapped and aerial tree paths must both use the high-fidelity generator");
+  assert.equal(
+    raster.includes("const model = compileTreeModel({"), false,
+    "live tree paths must not fall back to the legacy spherical compiler"
+  );
+});
 test("Java rooted_dirt alias is not emitted", async () => {
   const text = (await Promise.all([
     readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8"),
