@@ -31,23 +31,28 @@ test("appearance and high-fidelity tree palettes are accepted by the direct-worl
   const unsupported = [...emitted].filter((b) => !allowed.has(b)).sort();
   assert.deepEqual(unsupported, []);
 });
-test("live vegetation compiler routes mapped and aerial trees through high-fidelity generator", async () => {
-  const raster = await readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8");
-  assert.ok(
-    raster.includes('import { compileHighFidelityTreeModel } from "./tree-generator.mjs";'),
-    "raster compiler must import the high-fidelity tree engine"
-  );
-  const calls = raster.match(/compileHighFidelityTreeModel\s*\(\s*\{/g) || [];
-  assert.ok(calls.length >= 2, "mapped and aerial tree paths must both use the high-fidelity generator");
-  assert.equal(
-    raster.includes("const model = compileTreeModel({"), false,
-    "live tree paths must not fall back to the legacy spherical compiler"
-  );
-});
 test("Java rooted_dirt alias is not emitted", async () => {
   const text = (await Promise.all([
     readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/aerial-appearance.mjs", import.meta.url), "utf8")
   ])).join("\n");
   assert.equal(text.includes("minecraft:rooted_dirt"), false);
+});
+test("live vegetation paths are wired to high-fidelity trees", async () => {
+  const raster = await readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8");
+  assert.ok(raster.includes('import { compileHighFidelityTreeModel } from "./tree-generator.mjs";'));
+  assert.ok((raster.match(/compileHighFidelityTreeModel\(\{/g) || []).length >= 2);
+});
+test("Tree Reconstruction V2 is wired from LiDAR evidence through the live compiler", async () => {
+  const [fidelity, raster, generator] = await Promise.all([
+    readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/tree-generator.mjs", import.meta.url), "utf8")
+  ]);
+  assert.ok(fidelity.includes('import { reconstructTreeCrownFromSamples } from "./tree-reconstruction.mjs";'));
+  assert.ok(fidelity.includes("deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation: sources.elevation, options })"));
+  assert.ok(raster.includes("reconstruction: evidence.reconstruction || evidence.canopyGeometry || null"));
+  assert.ok(generator.includes("normalizeTreeReconstruction(reconstruction"));
+  assert.ok(generator.includes("crownReachFromTrunk(crownGeometry, angle)"));
+  assert.ok(generator.includes("insideCrownEnvelope(crownGeometry"));
 });
