@@ -35,3 +35,4 @@ jobs:
           git add src/lib/tree-generator.mjs
           git commit -m "Reconstruct species-aware foliage microstructure"
           git push origin HEAD:agent/realistic-tree-presets-v1
+# trigger: foliage-v2
