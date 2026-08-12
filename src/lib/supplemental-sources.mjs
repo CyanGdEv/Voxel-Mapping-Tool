@@ -149,7 +149,10 @@ async function acquireTreesOutsideWoodland(runtime, options) {
       return standardizeFeature(feature, {
         idPrefix: `tow:${collection.id}`,
         index,
-        explicitId: sourceId ? `tow:${collection.id}:${sourceId}:${tileId || index}` : null,
+        // TOW_ID is not globally unique: the live service can return multiple
+        // canopy polygons with the same TOW_ID and KM1 tile. Keep the upstream
+        // identity readable while adding a deterministic per-response ordinal.
+        explicitId: sourceId ? towFeatureId(collection.id, sourceId, tileId, index) : null,
         provider: "Forestry Commission / Forest Research",
         sourceUrl: baseUrl,
         license: OGL_3,
@@ -1092,6 +1095,10 @@ function firstString(object = {}, keys = []) {
   return null;
 }
 
+function towFeatureId(collectionId, sourceId, tileId, index) {
+  return `tow:${collectionId}:${sourceId}:${tileId || "no-tile"}:${index}`;
+}
+
 function stripHtml(value) {
   return value ? String(value).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : null;
 }
@@ -1108,6 +1115,7 @@ export const __test = {
   classifyOsOpenMapLocal,
   selectMicrosoftRows,
   inferTowSubtype,
+  towFeatureId,
   parseByteSize,
   gunzipLines
 };

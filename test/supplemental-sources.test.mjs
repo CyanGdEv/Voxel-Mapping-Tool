@@ -102,6 +102,14 @@ test("official TOW field names and woodland classes are retained", () => {
   assert.equal(__test.inferTowSubtype({ Woodland_Type: "Group of Trees" }), "tree-group-canopy");
   assert.equal(__test.inferTowSubtype({ WOODLAND_TYPE: "Small Woodland" }), "small-woodland");
   assert.equal(__test.inferTowSubtype({ woodland_type: "NFI OHC" }), "nfi-overhanging-canopy");
+  assert.equal(
+    __test.towFeatureId("FR_TOW_V1_West_Midlands", "128_TSK04", "SK0742", 17),
+    "tow:FR_TOW_V1_West_Midlands:128_TSK04:SK0742:17"
+  );
+  assert.notEqual(
+    __test.towFeatureId("FR_TOW_V1_West_Midlands", "128_TSK04", "SK0742", 17),
+    __test.towFeatureId("FR_TOW_V1_West_Midlands", "128_TSK04", "SK0742", 18)
+  );
 });
 
 
