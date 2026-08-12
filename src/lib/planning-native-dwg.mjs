@@ -2,14 +2,16 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   extractNativeDxfPlanning as extractStrictDxfPlanning,
   looksLikeAsciiDxf as looksLikeStrictAsciiDxf
 } from "./planning-native-dxf.mjs";
 
 const DEFAULT_CONVERTER = "dwg2dxf";
+const LIBREDWG_VERSION = "0.14";
 const CONVERTER_TIMEOUT_MS = 90_000;
+const BOOTSTRAP_TIMEOUT_MS = 240_000;
 const VERSION_CACHE = new Map();
 
 /**
@@ -34,26 +36,34 @@ export function extractNativeDwgPlanning({
 
   let converted;
   let detectedVersion = converterVersion;
+  let effectiveConverterPath = converterPath;
   try {
     if (typeof convertDwg === "function") {
       const result = convertDwg(source, { converterPath, document, application });
       converted = Buffer.isBuffer(result) ? result : Buffer.from(result || []);
       detectedVersion ||= "injected-test-converter";
     } else {
-      const result = convertWithLibreDwg(source, converterPath);
+      let result;
+      try {
+        result = convertWithLibreDwg(source, effectiveConverterPath);
+      } catch (error) {
+        if (!converterUnavailable(error) || !shouldBootstrapConverter(converterPath)) throw error;
+        effectiveConverterPath = bootstrapLibreDwg();
+        result = convertWithLibreDwg(source, effectiveConverterPath);
+      }
       converted = result.bytes;
       detectedVersion ||= result.version;
     }
   } catch (error) {
-    const unavailable = error?.code === "ENOENT" || /ENOENT|not found|no such file/i.test(error?.message || String(error));
-    return empty(unavailable ? "native-dwg-converter-unavailable" : "native-dwg-conversion-failed", error, converterPath, {
+    const unavailable = converterUnavailable(error);
+    return empty(unavailable ? "native-dwg-converter-unavailable" : "native-dwg-conversion-failed", error, effectiveConverterPath, {
       sourceHash,
       converterVersion: detectedVersion
     });
   }
 
   if (!looksLikeStrictAsciiDxf(converted)) {
-    return empty("native-dwg-conversion-invalid-dxf", new Error("DWG converter did not produce ASCII DXF"), converterPath, {
+    return empty("native-dwg-conversion-invalid-dxf", new Error("DWG converter did not produce ASCII DXF"), effectiveConverterPath, {
       sourceHash,
       converterVersion: detectedVersion
     });
@@ -89,7 +99,7 @@ export function extractNativeDwgPlanning({
     nativeFormat: "dwg",
     conversion: {
       engine: "GNU LibreDWG dwg2dxf",
-      converterPath,
+      converterPath: effectiveConverterPath,
       version: detectedVersion || "unknown",
       sourceSha256: sourceHash,
       intermediateSha256: convertedHash,
@@ -120,6 +130,38 @@ function convertWithLibreDwg(source, converterPath) {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function shouldBootstrapConverter(converterPath) {
+  if (converterPath !== DEFAULT_CONVERTER) return false;
+  if (process.env.TPMAP_AUTO_BUILD_DWG_CONVERTER === "0") return false;
+  return process.env.TPMAP_AUTO_BUILD_DWG_CONVERTER === "1" || process.env.GITHUB_ACTIONS === "true";
+}
+
+function bootstrapLibreDwg() {
+  const prefix = path.resolve(
+    process.env.TPMAP_DWG_TOOL_PREFIX || path.join(".tpmap-cache", "native-tools", `libredwg-${LIBREDWG_VERSION}`)
+  );
+  const executable = path.join(prefix, "bin", "dwg2dxf");
+  if (existsSync(executable)) return executable;
+
+  const script = path.resolve("scripts", "build-libredwg.sh");
+  if (!existsSync(script)) {
+    const error = new Error(`LibreDWG bootstrap script is missing: ${script}`);
+    error.code = "ENOENT";
+    throw error;
+  }
+  execFileSync("bash", [script, prefix], {
+    timeout: BOOTSTRAP_TIMEOUT_MS,
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (!existsSync(executable)) throw new Error("LibreDWG bootstrap completed without dwg2dxf");
+  return executable;
+}
+
+function converterUnavailable(error) {
+  return error?.code === "ENOENT" || /ENOENT|not found|no such file/i.test(error?.message || String(error));
 }
 
 function converterVersion(converterPath) {
