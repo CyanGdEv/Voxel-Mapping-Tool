@@ -3,6 +3,7 @@ import { UserError, invariant } from "./errors.mjs";
 import { RIDE_EVIDENCE_LEGEND } from "./ride-profile.mjs";
 import { blockForSurfaceStyle, isBridgeFeature } from "./fidelity.mjs";
 import { terrainStyleForAerialClass, vegetationPaletteForRgb } from "./aerial-appearance.mjs";
+import { compileHighFidelityTreeModel } from "./tree-generator.mjs";
 
 const SURFACES = [
   "minecraft:grass_block",
@@ -846,11 +847,12 @@ function compileAerialCanopyVegetation(context) {
         stats.rejected += 1;
         continue;
       }
-      const model = compileTreeModel({
+      const model = compileHighFidelityTreeModel({
         add, x, z, groundY: elevationY[index], heightM: resolvedHeight.heightM,
         crownDiameterM: null, leafType: null,
         leafPalette: vegetationPaletteForRgb(classification.rgb),
-        seed: seed ^ hashText(`aerial-tree:${x}:${z}`)
+        seed: seed ^ hashText(`aerial-tree:${x}:${z}`),
+        detailLevel: options.treeDetailLevel || "medium"
       });
       stats.models += 1;
       stats.trunkBlocks += model.trunkBlocks;
@@ -1272,10 +1274,12 @@ function compileVegetationFeature(context) {
     const leafPalette = vegetationPaletteForRgb(
       candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle, evidence.species
     );
-    const model = compileTreeModel({
+    const model = compileHighFidelityTreeModel({
       add, x, z, groundY: elevationY[index], heightM: resolvedHeight.heightM,
       crownDiameterM: evidence.crownDiameterM, leafType: evidence.leafType, species: evidence.species,
-      leafPalette, seed: seed ^ hashText(`${feature.id}:${x}:${z}`)
+      genus: evidence.genus, tags: feature.tags || {},
+      leafPalette, seed: seed ^ hashText(`${feature.id}:${x}:${z}`),
+      detailLevel: options.treeDetailLevel || "high"
     });
     stats.models += 1;
     stats.trunkBlocks += model.trunkBlocks;
