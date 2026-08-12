@@ -1,0 +1,37 @@
+name: Tree Reconstruction V3 patch
+
+on:
+  push:
+    branches:
+      - agent/realistic-tree-presets-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply-tree-reconstruction-v3:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/realistic-tree-presets-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply touching-canopy watershed integration
+        run: node scripts/patch-tree-reconstruction-v3.mjs
+      - name: Validate focused tree tests
+        run: node --test test/tree-reconstruction.test.mjs test/appearance-vegetation.test.mjs
+      - name: Commit integration
+        run: |
+          if git diff --quiet -- src/lib/tree-reconstruction.mjs src/lib/fidelity.mjs test/appearance-vegetation.test.mjs; then
+            echo "Tree Reconstruction V3 integration already applied"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/tree-reconstruction.mjs src/lib/fidelity.mjs test/appearance-vegetation.test.mjs
+          git commit -m "Separate touching tree crowns with LiDAR watershed"
+          git push origin HEAD:agent/realistic-tree-presets-v1
