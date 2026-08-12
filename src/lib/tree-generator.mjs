@@ -3,6 +3,7 @@ import { crownReachFromTrunk, insideCrownEnvelope, normalizeTreeReconstruction }
 import { inferTreeStructuralForm } from "./tree-structural-form.mjs";
 import { inferTreeTrunkLean, trunkAxisOffsetAt } from "./tree-trunk-lean.mjs";
 import { resolveTreeDbh, dbhToVoxelProfile } from "./tree-dbh.mjs";
+import { resolveTreeStemArchitecture, insideStemCrossSection, barkDetailBlock } from "./tree-stem-architecture.mjs";
 
 const TAU = Math.PI * 2;
 
@@ -38,6 +39,7 @@ export function compileHighFidelityTreeModel({
   const structuralForm = inferTreeStructuralForm({ heightM, crownDiameterM, species, genus, leafType, tags, reconstruction });
   const dbh = resolveTreeDbh({ heightM, crownDiameterM, species, genus, leafType, tags, structuralForm });
   const trunkProfile = dbhToVoxelProfile(dbh.dbhM, { structuralForm });
+  const stemArchitecture = resolveTreeStemArchitecture({ dbhM: dbh.dbhM, species, genus, tags, structuralForm, seed });
   const trunkLeanRaw = inferTreeTrunkLean({ heightM, crownDiameterM, tags, reconstruction });
   const trunkLean = trunkLeanRaw.normalizedAt10m
     ? { ...trunkLeanRaw, dxM: trunkLeanRaw.dxM * treeHeight / 10, dzM: trunkLeanRaw.dzM * treeHeight / 10, topShiftM: trunkLeanRaw.topShiftM * treeHeight / 10, normalizedAt10m: false }
@@ -56,7 +58,7 @@ export function compileHighFidelityTreeModel({
   };
 
   const trunkRadius = clamp(Math.max(trunkProfile.breastRadiusBlocks, Math.round(trunkProfile.breastRadiusBlocks * structuralForm.trunkScale)), 0, 3);
-  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed, structuralForm, trunkLean, trunkProfile });
+  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed, structuralForm, trunkLean, trunkProfile, stemArchitecture });
 
   const branchTips = emitMajorBranches({
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
@@ -109,12 +111,20 @@ export function compileHighFidelityTreeModel({
     dbhM: dbh.dbhM,
     dbhConfidence: dbh.confidence,
     trunkBaseRadiusBlocks: trunkProfile.baseRadiusBlocks,
-    rootReachBlocks: trunkProfile.rootReachBlocks
+    rootReachBlocks: trunkProfile.rootReachBlocks,
+    stemArchitectureSource: stemArchitecture.source,
+    stemArchitectureObserved: stemArchitecture.observed,
+    stemCrossSection: stemArchitecture.form,
+    stemEllipticity: stemArchitecture.ellipticity,
+    stemFluting: stemArchitecture.fluting,
+    stemHollow: stemArchitecture.hollow,
+    stemHollowObserved: stemArchitecture.hollowObserved,
+    barkCharacter: stemArchitecture.barkCharacter
   };
 }
 
-function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed, structuralForm, trunkLean, trunkProfile }) {
-  const stems = Math.max(1, Math.min(5, structuralForm?.stemCount || 1));
+function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed, structuralForm, trunkLean, trunkProfile, stemArchitecture }) {
+  const stems = Math.max(1, Math.min(8, stemArchitecture?.stemCount || structuralForm?.stemCount || 1));
   const stemOffsets = [{ x: 0, z: 0 }];
   for (let stem = 1; stem < stems; stem += 1) {
     const angle = (stem / stems) * TAU + random01(seed, 900 + stem) * 0.45;
@@ -128,17 +138,19 @@ function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, see
     const localRadius = t < 0.18 ? Math.max(radius, trunkProfile?.baseRadiusBlocks || radius) : t > 0.72 ? Math.min(radius, trunkProfile?.upperRadiusBlocks ?? Math.max(0, radius - 1)) : radius;
     for (let dz = -localRadius; dz <= localRadius; dz += 1) {
       for (let dx = -localRadius; dx <= localRadius; dx += 1) {
-        if (dx * dx + dz * dz > (localRadius + 0.25) ** 2) continue;
-        const bark = pick(preset.trunk, hash3d(x + dx, groundY + dy, z + dz, seed));
+        if (!insideStemCrossSection(dx, dz, localRadius + 0.25, stemArchitecture, dy)) continue;
+        const bark = barkDetailBlock({ preset, architecture: stemArchitecture, x: axisX + stemOffset.x + dx, y: groundY + dy, z: axisZ + stemOffset.z + dz, seed });
         put(axisX + stemOffset.x + dx, groundY + dy, axisZ + stemOffset.z + dz, bark, "trunk");
       }
     }
   }
   if ((trunkProfile?.baseRadiusBlocks || radius) > 0) {
-    const roots = 4 + (hash3d(x, groundY, z, seed) % 3);
+    const buttressBias = stemArchitecture?.form === "irregular" || stemArchitecture?.form === "fluted" ? 2 : 0;
+    const roots = 4 + buttressBias + (hash3d(x, groundY, z, seed) % 3);
     for (let i = 0; i < roots; i += 1) {
       const angle = (i / roots) * TAU + random01(seed, i) * 0.7;
-      const maxRootReach = Math.max(1, trunkProfile?.rootReachBlocks || radius + 1);
+      const directionalNoise = 0.75 + random01(seed ^ 0x7f4a7c15, i + 71) * 0.65;
+      const maxRootReach = Math.max(1, Math.round((trunkProfile?.rootReachBlocks || radius + 1) * directionalNoise));
       const length = 1 + (hash3d(x + i, groundY, z - i, seed) % maxRootReach);
       const end = [x + Math.round(Math.cos(angle) * length), groundY + 1, z + Math.round(Math.sin(angle) * length)];
       emitLine(put, [x, groundY + 1, z], end, preset.branches, "branch", seed ^ i);
