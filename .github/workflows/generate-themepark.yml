@@ -108,7 +108,9 @@ jobs:
 
   generate:
     needs: [planning-plan, planning-extract]
-    runs-on: ubuntu-24.04
+    # Set TPMAP_GENERATION_RUNNER to a configured larger-runner label (8/16+ cores)
+    # without changing this workflow. Falls back to the standard hosted runner.
+    runs-on: ${{ vars.TPMAP_GENERATION_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 360
     env:
       PARK_ID: ${{ inputs.park }}
@@ -133,6 +135,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Configure full-runner CPU parallelism
+        shell: bash
+        run: |
+          set -euo pipefail
+          cores="$(nproc)"
+          libuv="$cores"
+          if [ "$libuv" -gt 128 ]; then libuv=128; fi
+          {
+            echo "TPMAP_CPU_WORKERS=$cores"
+            echo "UV_THREADPOOL_SIZE=$libuv"
+            echo "GDAL_NUM_THREADS=ALL_CPUS"
+            echo "OMP_NUM_THREADS=$cores"
+            echo "OMP_THREAD_LIMIT=$cores"
+            echo "OPENBLAS_NUM_THREADS=$cores"
+            echo "MKL_NUM_THREADS=$cores"
+            echo "NUMEXPR_NUM_THREADS=$cores"
+            echo "OPENCV_FOR_THREADS_NUM=$cores"
+          } >> "$GITHUB_ENV"
+          echo "Generator CPU budget: $cores logical cores (libuv=$libuv)"
+          lscpu | sed -n '1,18p'
 
       - name: Restore bounded source and planning cache
         id: source-cache
@@ -178,6 +201,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Building with TPMAP_CPU_WORKERS=$TPMAP_CPU_WORKERS, UV_THREADPOOL_SIZE=$UV_THREADPOOL_SIZE, GDAL_NUM_THREADS=$GDAL_NUM_THREADS"
           args=(
             build
             --park "$PARK_ID"
