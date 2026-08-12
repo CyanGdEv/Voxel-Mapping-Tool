@@ -57,6 +57,7 @@ Core options
   --planning-plan FILE              Frozen automatic document queue produced by planning-plan
   --planning-shard-index N          Zero-based extraction shard (CI preparation command)
   --planning-shard-count N          Total extraction shards; every document remains covered once
+  --prepared-planning-directory DIR Reuse validated extraction-shard results during the final build
   --planning-georef-min-confidence .72
                                     Minimum automatic drawing alignment confidence
   --planning-world-authority planning-only|fixture
