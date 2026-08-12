@@ -3,6 +3,7 @@ import {
   withThemeParkMaterialHints
 } from "./surface-material-library.mjs";
 import { polygonArea } from "./geo.mjs";
+import { reconstructTreeCrownFromSamples } from "./tree-reconstruction.mjs";
 
 const PATH_KINDS = new Set(["path", "road"]);
 
@@ -591,6 +592,17 @@ function deriveTreeEvidence(feature, sources, options) {
     }
   }
 
+  const reconstruction = point && modelClass === "tree"
+    ? deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation: sources.elevation, options })
+    : null;
+  if (crownDiameter === null && reconstruction) {
+    crownDiameter = round1(Math.max(
+      reconstruction.westM + reconstruction.eastM,
+      reconstruction.northM + reconstruction.southM
+    ));
+    crownSource = "dsm-dtm-connected-canopy";
+  }
+
   const taggedSpacing = parseLength(firstValue(tags.tree_spacing_m, tags.spacing, tags["tree:spacing"]));
   const treeCount = integerOrNull(firstValue(tags.tree_count, tags.count, tags.trees))
     ?? (modelClass === "tree" ? 1 : null);
@@ -614,6 +626,10 @@ function deriveTreeEvidence(feature, sources, options) {
     heightSource,
     crownDiameterM: crownDiameter,
     crownSource,
+    reconstruction,
+    crownShapeSource: reconstruction?.source || null,
+    crownShapeSampleCount: reconstruction?.sampleCount || 0,
+    crownBaseHeightM: reconstruction?.crownBaseHeightM ?? null,
     spacingM,
     spacingSource: taggedSpacing ? "tagged-spacing" : `default-${modelClass}-spacing`,
     densityPer100M2: densityPer100M2Value,
@@ -630,6 +646,51 @@ function deriveTreeEvidence(feature, sources, options) {
     source: heightSource ? evidenceSource(feature, heightSource)
       : evidenceSource(feature, polygonCover || lineCover ? "mapped vegetation extent" : "mapped vegetation position")
   };
+}
+
+function deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation, options }) {
+  if (typeof elevation?.samplePairLocal !== "function") return null;
+  const resolutionM = Math.max(0.25, Math.min(2, Number(elevation.resolutionM) || 1));
+  const sampleStepM = Math.max(0.5, Number(options.treeCrownSampleStepM ?? Math.min(1, resolutionM)));
+  const observedRadius = Number.isFinite(crownDiameter) ? crownDiameter / 2 : null;
+  const heightRadius = Number.isFinite(heightM) ? Math.max(4, Math.min(14, heightM * 0.55)) : 7;
+  const searchRadiusM = Math.max(3, Math.min(20, Number(
+    options.treeCrownSearchRadiusM ?? (observedRadius ? observedRadius + Math.max(2, sampleStepM * 2) : heightRadius)
+  )));
+  const samples = [];
+  for (let dz = -searchRadiusM; dz <= searchRadiusM + 1e-9; dz += sampleStepM) {
+    for (let dx = -searchRadiusM; dx <= searchRadiusM + 1e-9; dx += sampleStepM) {
+      if (dx * dx + dz * dz > searchRadiusM * searchRadiusM) continue;
+      const x = point[0] + dx, z = point[1] + dz;
+      const pair = elevation.samplePairLocal(x, z);
+      if (!Number.isFinite(pair?.surface) || !Number.isFinite(pair?.terrain)) continue;
+      samples.push({ x, z, surfaceM: pair.surface, groundM: pair.terrain });
+    }
+  }
+  const reconstruction = reconstructTreeCrownFromSamples({
+    x: point[0], z: point[1], samples, cellSizeM: sampleStepM,
+    minCanopyHeightM: Math.max(1.5, Number(options.treeMinCanopyHeightM ?? 2)),
+    maxSeedDistanceM: Math.max(2, Number(options.treeCrownSeedDistanceM ?? 3))
+  });
+  if (!reconstruction) return null;
+
+  // A tagged/mapped crown diameter is higher-authority horizontal evidence than
+  // a DSM segmentation edge. Preserve its outer diameter while retaining the
+  // LiDAR-derived asymmetry and centre offset as a normalized directional shape.
+  if (Number.isFinite(crownDiameter) && crownDiameter > 0) {
+    const measuredDiameter = Math.max(
+      reconstruction.westM + reconstruction.eastM,
+      reconstruction.northM + reconstruction.southM
+    );
+    if (measuredDiameter > crownDiameter && measuredDiameter > 0) {
+      const scale = crownDiameter / measuredDiameter;
+      for (const key of ["westM", "eastM", "northM", "southM", "radiusXM", "radiusZM", "offsetXM", "offsetZM"]) {
+        if (Number.isFinite(reconstruction[key])) reconstruction[key] = round3(reconstruction[key] * scale);
+      }
+      reconstruction.horizontalEnvelopeClampedToMappedCrown = true;
+    }
+  }
+  return reconstruction;
 }
 
 function vegetationModelClass(feature) {
