@@ -50,6 +50,8 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.doesNotMatch(workflow, /--planning-manifest/);
   assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
   assert.doesNotMatch(workflow, /Configure the TPMAP_CONTACT repository secret/);
+  assert.equal((workflow.match(/github\.run_attempt/g) || []).length, 2,
+    "cache restore and save keys must be unique for every retry attempt");
 });
 
 test("automatic planning controls are bounded and can be explicitly disabled for expert inputs", () => {
