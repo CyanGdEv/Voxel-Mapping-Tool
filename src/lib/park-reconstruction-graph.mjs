@@ -36,21 +36,28 @@ export function buildParkReconstructionGraph({ parkName, map, sources = {}, accu
     nodesWithMaterialEvidence: 0,
     planningGeometryNodes: 0,
     independentGeometryNodes: 0,
+    duplicateSourceIdsDisambiguated: 0,
     relationships: 0,
     relationshipTypes: {}
   };
 
   const nodes = [];
   const evidenceNodes = [];
+  const physicalIds = new Map();
+  const observationIds = new Map();
   for (const feature of map.features) {
     const evidenceNode = featureToEvidenceObservation(feature, sources, mode);
     if (evidenceNode) {
+      evidenceNode.id = uniqueNodeId(evidenceNode.id, observationIds, stats);
       evidenceNodes.push(evidenceNode);
       stats.evidenceObservationNodes += 1;
       continue;
     }
     const node = featureToNode(feature, sources, mode, stats);
-    if (node) nodes.push(node);
+    if (node) {
+      node.id = uniqueNodeId(node.id, physicalIds, stats);
+      nodes.push(node);
+    }
   }
   nodes.sort((a, b) => a.id.localeCompare(b.id));
   evidenceNodes.sort((a, b) => a.id.localeCompare(b.id));
@@ -101,6 +108,15 @@ export function buildParkReconstructionGraph({ parkName, map, sources = {}, accu
   });
   validateParkReconstructionGraph(graph, { requirePlanningOnlyClean: mode === "planning-only" });
   return graph;
+}
+
+function uniqueNodeId(value, occurrences, stats) {
+  const sourceId = String(value || "");
+  const occurrence = (occurrences.get(sourceId) || 0) + 1;
+  occurrences.set(sourceId, occurrence);
+  if (occurrence === 1) return sourceId;
+  stats.duplicateSourceIdsDisambiguated += 1;
+  return `${sourceId}#duplicate-${occurrence}`;
 }
 
 export function reconstructionCompilerMap(map) {
