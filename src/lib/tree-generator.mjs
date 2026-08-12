@@ -1,5 +1,6 @@
 import { crownRadiusAt, resolveTreeDimensions, selectTreePreset } from "./tree-presets.mjs";
 import { crownReachFromTrunk, insideCrownEnvelope, normalizeTreeReconstruction } from "./tree-reconstruction.mjs";
+import { inferTreeStructuralForm } from "./tree-structural-form.mjs";
 
 const TAU = Math.PI * 2;
 
@@ -32,6 +33,7 @@ export function compileHighFidelityTreeModel({
   const presetCrownBase = clamp(Math.round(treeHeight * preset.branchStart), 2, treeHeight - 2);
   const crownGeometry = normalizeTreeReconstruction(reconstruction, { crownRadius, crownBase: presetCrownBase, treeHeight });
   const crownBase = crownGeometry.crownBase;
+  const structuralForm = inferTreeStructuralForm({ heightM, crownDiameterM, species, genus, leafType, tags, reconstruction });
   const treeSeed = seed ^ hashText(`${x}:${z}:${preset.id}`);
   const blocks = new Map();
 
@@ -45,24 +47,26 @@ export function compileHighFidelityTreeModel({
     if (!current || priority(role) >= priority(current.role)) blocks.set(key, next);
   };
 
-  const trunkRadius = treeHeight >= 24 || crownDiameterM >= 15 ? 2
+  const baseTrunkRadius = treeHeight >= 24 || crownDiameterM >= 15 ? 2
     : treeHeight >= 14 || crownDiameterM >= 9 ? 1 : 0;
-  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed });
+  const trunkRadius = clamp(Math.round((baseTrunkRadius + 1) * structuralForm.trunkScale) - 1, 0, 3);
+  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed, structuralForm });
 
   const branchTips = emitMajorBranches({
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed: treeSeed, detailLevel
+    preset, seed: treeSeed, detailLevel, structuralForm
   });
 
   const palette = leafPalette.length ? leafPalette : preset.leaves;
   emitCanopyClusters({
     put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry,
-    preset, palette, branchTips, seed: treeSeed, detailLevel
+    preset, palette, branchTips, seed: treeSeed, detailLevel, structuralForm
   });
 
   if (preset.crownShape === "weeping") {
     emitWeepingCurtains({ put, groundY, treeHeight, crownBase, branchTips, palette, seed: treeSeed });
   }
+  emitStructuralDeadwood({ put, branchTips, preset, structuralForm, seed: treeSeed });
 
   put(x, groundY + treeHeight, z, pick(palette, hash3d(x, groundY + treeHeight, z, treeSeed)), "leaf");
 
@@ -85,19 +89,29 @@ export function compileHighFidelityTreeModel({
     reconstructionObserved: crownGeometry.observed,
     crownBaseObserved: crownGeometry.crownBaseObserved,
     crownOffsetBlocks: { x: crownGeometry.offsetX, z: crownGeometry.offsetZ },
-    crownRadiiBlocks: { x: crownGeometry.radiusX, z: crownGeometry.radiusZ }
+    crownRadiiBlocks: { x: crownGeometry.radiusX, z: crownGeometry.radiusZ },
+    structuralForm: structuralForm.form,
+    structuralFormConfidence: structuralForm.confidence,
+    structuralStemCount: structuralForm.stemCount,
+    structuralDeadwoodFraction: structuralForm.deadwoodFraction
   };
 }
 
-function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed }) {
-  for (let dy = 1; dy <= trunkHeight; dy += 1) {
+function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed, structuralForm }) {
+  const stems = Math.max(1, Math.min(5, structuralForm?.stemCount || 1));
+  const stemOffsets = [{ x: 0, z: 0 }];
+  for (let stem = 1; stem < stems; stem += 1) {
+    const angle = (stem / stems) * TAU + random01(seed, 900 + stem) * 0.45;
+    stemOffsets.push({ x: Math.round(Math.cos(angle)), z: Math.round(Math.sin(angle)) });
+  }
+  for (const stemOffset of stemOffsets) for (let dy = 1; dy <= trunkHeight; dy += 1) {
     const t = dy / trunkHeight;
     const localRadius = t > 0.72 ? Math.max(0, radius - 1) : radius;
     for (let dz = -localRadius; dz <= localRadius; dz += 1) {
       for (let dx = -localRadius; dx <= localRadius; dx += 1) {
         if (dx * dx + dz * dz > (localRadius + 0.25) ** 2) continue;
         const bark = pick(preset.trunk, hash3d(x + dx, groundY + dy, z + dz, seed));
-        put(x + dx, groundY + dy, z + dz, bark, "trunk");
+        put(x + stemOffset.x + dx, groundY + dy, z + stemOffset.z + dz, bark, "trunk");
       }
     }
   }
@@ -115,7 +129,7 @@ function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, see
 function emitMajorBranches(context) {
   const {
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed, detailLevel
+    preset, seed, detailLevel, structuralForm
   } = context;
   const tiers = clamp(Math.round(preset.branchTiers), 2, 10);
   const tips = [];
@@ -132,7 +146,7 @@ function emitMajorBranches(context) {
       const angle = baseAngle + (branch / count) * TAU + jitter;
       const measuredReach = crownReachFromTrunk(crownGeometry, angle);
       const directionalScale = measuredReach / Math.max(0.5, crownRadius);
-      const length = tierRadius * directionalScale * (0.68 + random01(seed ^ 0x9e3779b9, tier * 53 + branch) * 0.34);
+      const length = tierRadius * directionalScale * (0.68 + random01(seed ^ 0x9e3779b9, tier * 53 + branch) * 0.34) * (structuralForm?.branchScale || 1);
       const rise = preset.family === "conifer"
         ? (0.12 - t * 0.2) * length
         : (0.18 + random01(seed, branch * 31 + tier) * 0.18 - preset.branchDroop) * length;
@@ -163,7 +177,7 @@ function emitSecondaryTwigs({ put, tip, preset, crownRadius, seed }) {
 }
 
 function emitCanopyClusters(context) {
-  const { put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry, preset, palette, branchTips, seed, detailLevel } = context;
+  const { put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry, preset, palette, branchTips, seed, detailLevel, structuralForm } = context;
   const clusterScale = detailLevel === "medium" ? 0.85 : 1;
   const crownHeight = Math.max(2, treeHeight - crownBase + 1);
   const centres = [...branchTips];
@@ -191,7 +205,7 @@ function emitCanopyClusters(context) {
     const radiusX = clamp(Math.round((1.25 + random01(seed, index * 3) * 1.4) * clusterScale), 1, Math.max(1, Math.ceil(silhouetteRadius * 0.5)));
     const radiusZ = clamp(Math.round((1.25 + random01(seed, index * 3 + 1) * 1.4) * clusterScale), 1, Math.max(1, Math.ceil(silhouetteRadius * 0.5)));
     const radiusY = clamp(Math.round((1 + random01(seed, index * 3 + 2) * 1.4) * clusterScale), 1, 3);
-    emitOrganicLeafCluster({ put, centre, radiusX, radiusY, radiusZ, palette, density: preset.canopyDensity, seed: seed ^ index * 2654435761 });
+    emitOrganicLeafCluster({ put, centre, radiusX, radiusY, radiusZ, palette, density: Math.min(0.98, preset.canopyDensity * (structuralForm?.canopyDensityScale || 1)), seed: seed ^ index * 2654435761 });
   }
   const shellSamples = clamp(Math.round(crownRadius * 8), 12, 80);
   for (let i = 0; i < shellSamples; i += 1) {
@@ -222,6 +236,18 @@ function emitOrganicLeafCluster({ put, centre, radiusX, radiusY, radiusZ, palett
         put(px, py, pz, pick(palette, hash3d(px, py, pz, seed)), "leaf");
       }
     }
+  }
+}
+
+function emitStructuralDeadwood({ put, branchTips, preset, structuralForm, seed }) {
+  const fraction = Number(structuralForm?.deadwoodFraction) || 0;
+  if (fraction <= 0 || !branchTips.length) return;
+  const count = Math.min(branchTips.length, Math.max(1, Math.round(branchTips.length * fraction)));
+  const ordered = [...branchTips].sort((a, b) => hash3d(a.x, a.y, a.z, seed ^ 0x6d2b79f5) - hash3d(b.x, b.y, b.z, seed ^ 0x6d2b79f5));
+  for (let i = 0; i < count; i += 1) {
+    const tip = ordered[i];
+    const length = 1 + (hash3d(tip.x, tip.y, tip.z, seed) % 3);
+    emitLine(put, [tip.x, tip.y, tip.z], [tip.x, tip.y - length, tip.z], preset.branches, "twig", seed ^ i ^ 0x27d4eb2d);
   }
 }
 
