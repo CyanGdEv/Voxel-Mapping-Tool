@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .tpmap-cache
-          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}
+          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           restore-keys: |
             source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
             source-v3-${{ runner.os }}-${{ inputs.park }}-
@@ -95,7 +95,9 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .tpmap-cache
-          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}
+          # GitHub caches are immutable. Including run_attempt lets a retry save
+          # newly acquired documents and derivatives over a restored snapshot.
+          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
       - name: Verify authority, provenance, labels, and world archive
         shell: bash
