@@ -3,7 +3,7 @@ name: Mcworld worker patch
 on:
   push:
     branches:
-      - agent/maximize-generation-cpu
+      - agent/maximize-generation-cpu-rebased
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: agent/maximize-generation-cpu
+          ref: agent/maximize-generation-cpu-rebased
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -38,4 +38,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/mcworld.mjs
           git commit -m "Parallelize Bedrock chunk serialization"
-          git push origin HEAD:agent/maximize-generation-cpu
+          git push origin HEAD:agent/maximize-generation-cpu-rebased
