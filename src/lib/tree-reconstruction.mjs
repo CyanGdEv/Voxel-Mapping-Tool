@@ -191,7 +191,7 @@ function splitTouchingCrown({ component, primary, competitors, cell }) {
   for (const anchor of anchors) {
     const key = cellKey(anchor.cell);
     const state = {
-      key, label: anchor.id, anchor,
+      key, label: anchor.id, anchor, targetX: anchor.cell.x, targetZ: anchor.cell.z,
       bottleneck: anchor.cell.canopyHeightM,
       distance: Math.hypot(anchor.cell.x - anchor.x, anchor.cell.z - anchor.z)
     };
@@ -216,7 +216,7 @@ function splitTouchingCrown({ component, primary, competitors, cell }) {
       const candidate = {
         key: nextKey,
         label: state.label,
-        anchor: state.anchor,
+        anchor: state.anchor, targetX: next.x, targetZ: next.z,
         bottleneck: Math.min(state.bottleneck, next.canopyHeightM),
         distance: state.distance + step
       };
@@ -257,8 +257,8 @@ function betterFloodState(candidate, current) {
   const epsilon = 1e-9;
   if (candidate.bottleneck > current.bottleneck + epsilon) return true;
   if (candidate.bottleneck < current.bottleneck - epsilon) return false;
-  const candidateDirect = Math.hypot(candidate.anchor.x - cellX(candidate.key), candidate.anchor.z - cellZ(candidate.key));
-  const currentDirect = Math.hypot(current.anchor.x - cellX(current.key), current.anchor.z - cellZ(current.key));
+  const candidateDirect = Math.hypot(candidate.anchor.x - candidate.targetX, candidate.anchor.z - candidate.targetZ);
+  const currentDirect = Math.hypot(current.anchor.x - current.targetX, current.anchor.z - current.targetZ);
   if (candidateDirect < currentDirect - epsilon) return true;
   if (candidateDirect > currentDirect + epsilon) return false;
   if (candidate.distance < current.distance - epsilon) return true;
@@ -329,8 +329,6 @@ function nearestCell(cells, x, z) {
   }, null);
 }
 function cellKey(sample) { return `${sample.gx},${sample.gz}`; }
-function cellX(key) { return Number(String(key).split(",")[0]); }
-function cellZ(key) { return Number(String(key).split(",")[1]); }
 function positive(value, fallback) { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : fallback; }
 function percentile(values, p) {
   if (!values.length) return NaN;

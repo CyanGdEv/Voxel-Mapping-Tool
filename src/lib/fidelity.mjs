@@ -102,6 +102,11 @@ const DEFAULT_MATERIAL_BLOCKS = Object.freeze({
 export function enrichUniversalFidelity(map, sources, options = {}) {
   const pathFeatures = map.features.filter((feature) => PATH_KINDS.has(feature.kind));
   const treeFeatures = map.features.filter((feature) => feature.kind === "vegetation");
+  const mappedTreeSeeds = treeFeatures
+    .filter((feature) => vegetationModelClass(feature) === "tree")
+    .map((feature) => ({ id: feature.id, point: geometryPoint(feature.localGeometry) }))
+    .filter((entry) => entry.point)
+    .map((entry) => ({ id: entry.id, x: entry.point[0], z: entry.point[1] }));
   const bridgeFeatures = pathFeatures.filter(isBridgeFeature);
   const terrainDetailFeatures = map.features.filter((feature) => feature.terrainDetail);
 
@@ -116,7 +121,7 @@ export function enrichUniversalFidelity(map, sources, options = {}) {
   }
   for (const feature of treeFeatures) {
     feature.fidelity ||= {};
-    feature.fidelity.tree = deriveTreeEvidence(feature, sources, options);
+    feature.fidelity.tree = deriveTreeEvidence(feature, sources, options, mappedTreeSeeds);
   }
   for (const feature of terrainDetailFeatures) {
     feature.fidelity ||= {};
@@ -562,7 +567,7 @@ function deriveBridgeEvidence(feature, sources, options) {
   };
 }
 
-function deriveTreeEvidence(feature, sources, options) {
+function deriveTreeEvidence(feature, sources, options, mappedTreeSeeds = []) {
   const tags = feature.tags || {};
   const geometry = feature.localGeometry?.type || null;
   const point = geometryPoint(feature.localGeometry);
@@ -593,14 +598,14 @@ function deriveTreeEvidence(feature, sources, options) {
   }
 
   const reconstruction = point && modelClass === "tree"
-    ? deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation: sources.elevation, options })
+    ? deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation: sources.elevation, options, mappedTreeSeeds, featureId: feature.id })
     : null;
   if (crownDiameter === null && reconstruction) {
     crownDiameter = round1(Math.max(
       reconstruction.westM + reconstruction.eastM,
       reconstruction.northM + reconstruction.southM
     ));
-    crownSource = "dsm-dtm-connected-canopy";
+    crownSource = reconstruction.source || "dsm-dtm-connected-canopy";
   }
 
   const taggedSpacing = parseLength(firstValue(tags.tree_spacing_m, tags.spacing, tags["tree:spacing"]));
@@ -630,6 +635,8 @@ function deriveTreeEvidence(feature, sources, options) {
     crownShapeSource: reconstruction?.source || null,
     crownShapeSampleCount: reconstruction?.sampleCount || 0,
     crownBaseHeightM: reconstruction?.crownBaseHeightM ?? null,
+    touchingSamplesRejected: reconstruction?.touchingSamplesRejected || 0,
+    watershedCompetitors: reconstruction?.watershedCompetitors || 0,
     spacingM,
     spacingSource: taggedSpacing ? "tagged-spacing" : `default-${modelClass}-spacing`,
     densityPer100M2: densityPer100M2Value,
@@ -648,7 +655,7 @@ function deriveTreeEvidence(feature, sources, options) {
   };
 }
 
-function deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation, options }) {
+function deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation, options, mappedTreeSeeds = [], featureId = null }) {
   if (typeof elevation?.samplePairLocal !== "function") return null;
   const resolutionM = Math.max(0.25, Math.min(2, Number(elevation.resolutionM) || 1));
   const sampleStepM = Math.max(0.5, Number(options.treeCrownSampleStepM ?? Math.min(1, resolutionM)));
@@ -657,6 +664,10 @@ function deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevatio
   const searchRadiusM = Math.max(3, Math.min(20, Number(
     options.treeCrownSearchRadiusM ?? (observedRadius ? observedRadius + Math.max(2, sampleStepM * 2) : heightRadius)
   )));
+  const competitorSeeds = mappedTreeSeeds
+    .filter((seed) => seed.id !== featureId)
+    .filter((seed) => Math.hypot(seed.x - point[0], seed.z - point[1]) <= searchRadiusM + Math.max(3, sampleStepM * 3))
+    .map((seed) => ({ x: seed.x, z: seed.z, id: seed.id }));
   const samples = [];
   for (let dz = -searchRadiusM; dz <= searchRadiusM + 1e-9; dz += sampleStepM) {
     for (let dx = -searchRadiusM; dx <= searchRadiusM + 1e-9; dx += sampleStepM) {
@@ -670,7 +681,8 @@ function deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevatio
   const reconstruction = reconstructTreeCrownFromSamples({
     x: point[0], z: point[1], samples, cellSizeM: sampleStepM,
     minCanopyHeightM: Math.max(1.5, Number(options.treeMinCanopyHeightM ?? 2)),
-    maxSeedDistanceM: Math.max(2, Number(options.treeCrownSeedDistanceM ?? 3))
+    maxSeedDistanceM: Math.max(2, Number(options.treeCrownSeedDistanceM ?? 3)),
+    competitorSeeds
   });
   if (!reconstruction) return null;
 
@@ -848,6 +860,7 @@ function summarizeTreeEvidence(features) {
     densityDerivedFeatures: entries.filter((entry) => String(entry.positionStatus || "").startsWith("density-derived")).length,
     heightEvidenced: entries.filter((entry) => entry.heightM !== null).length,
     crownEvidenced: entries.filter((entry) => entry.crownDiameterM !== null).length,
+    watershedSeparated: entries.filter((entry) => entry.watershedCompetitors > 0 && entry.touchingSamplesRejected > 0).length,
     speciesEvidenced: entries.filter((entry) => entry.species).length,
     positionOnly: entries.filter((entry) => entry.modelStatus === "position-only-marker").length
   };
