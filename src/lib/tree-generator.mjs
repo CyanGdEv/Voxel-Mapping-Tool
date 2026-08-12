@@ -6,6 +6,7 @@ import { resolveTreeDbh, dbhToVoxelProfile } from "./tree-dbh.mjs";
 import { resolveTreeStemArchitecture, insideStemCrossSection, barkDetailBlock } from "./tree-stem-architecture.mjs";
 import { resolveTreeBranchArchitecture, branchRadiusAt, junctionRadius } from "./tree-branch-architecture.mjs";
 import { resolveTreeFoliageMicrostructure, foliagePadRadii, shouldKeepFoliageCell, foliageCurtainLength } from "./tree-foliage-microstructure.mjs";
+import { resolveTreeFineDetail, pickFineTwigBlock, shouldEmitFineDetail, tertiaryTwigVector } from "./tree-fine-detail.mjs";
 
 const TAU = Math.PI * 2;
 
@@ -44,6 +45,7 @@ export function compileHighFidelityTreeModel({
   const stemArchitecture = resolveTreeStemArchitecture({ dbhM: dbh.dbhM, species, genus, tags, structuralForm, seed });
   const branchArchitecture = resolveTreeBranchArchitecture({ dbhM: dbh.dbhM, species, genus, structuralForm, preset, tags });
   const foliageMicrostructure = resolveTreeFoliageMicrostructure({ preset, species, genus, leafType, structuralForm, reconstruction, tags });
+  const fineDetail = resolveTreeFineDetail({ preset, detailLevel, family: preset.family, structuralForm });
   const trunkLeanRaw = inferTreeTrunkLean({ heightM, crownDiameterM, tags, reconstruction });
   const trunkLean = trunkLeanRaw.normalizedAt10m
     ? { ...trunkLeanRaw, dxM: trunkLeanRaw.dxM * treeHeight / 10, dzM: trunkLeanRaw.dzM * treeHeight / 10, topShiftM: trunkLeanRaw.topShiftM * treeHeight / 10, normalizedAt10m: false }
@@ -66,13 +68,13 @@ export function compileHighFidelityTreeModel({
 
   const branchTips = emitMajorBranches({
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed: treeSeed, detailLevel, structuralForm, trunkLean, trunkProfile, branchArchitecture
+    preset, seed: treeSeed, detailLevel, structuralForm, trunkLean, trunkProfile, branchArchitecture, fineDetail
   });
 
   const palette = leafPalette.length ? leafPalette : preset.leaves;
   emitCanopyClusters({
     put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry,
-    preset, palette, branchTips, seed: treeSeed, detailLevel, structuralForm, foliageMicrostructure
+    preset, palette, branchTips, seed: treeSeed, detailLevel, structuralForm, foliageMicrostructure, fineDetail
   });
 
   if ((foliageMicrostructure?.hangingFraction || 0) > 0) {
@@ -136,7 +138,10 @@ export function compileHighFidelityTreeModel({
     foliagePadStyle: foliageMicrostructure.padStyle,
     foliageDensity: foliageMicrostructure.density,
     foliageGapFraction: foliageMicrostructure.gapFraction,
-    foliageHangingFraction: foliageMicrostructure.hangingFraction
+    foliageHangingFraction: foliageMicrostructure.hangingFraction,
+    fineDetailEnabled: fineDetail.enabled,
+    fineDetailTerminalChance: fineDetail.terminalChance,
+    fineDetailEdgeChance: fineDetail.edgeChance
   };
 }
 
@@ -178,7 +183,7 @@ function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, see
 function emitMajorBranches(context) {
   const {
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed, detailLevel, structuralForm, trunkLean, trunkProfile, branchArchitecture
+    preset, seed, detailLevel, structuralForm, trunkLean, trunkProfile, branchArchitecture, fineDetail
   } = context;
   const tiers = clamp(Math.round(preset.branchTiers), 2, 10);
   const tips = [];
@@ -221,13 +226,13 @@ function emitMajorBranches(context) {
       }
       const tip = { x: Math.round(tipX), y: Math.round(tipY), z: Math.round(tipZ), angle, tier: t };
       tips.push(tip);
-      if (detailLevel !== "low") emitSecondaryTwigs({ put, tip, preset, crownRadius, seed: seed ^ hashText(`${tier}:${branch}`), branchArchitecture });
+      if (detailLevel !== "low") emitSecondaryTwigs({ put, tip, preset, crownRadius, seed: seed ^ hashText(`${tier}:${branch}`), branchArchitecture, fineDetail });
     }
   }
   return tips;
 }
 
-function emitSecondaryTwigs({ put, tip, preset, crownRadius, seed, branchArchitecture }) {
+function emitSecondaryTwigs({ put, tip, preset, crownRadius, seed, branchArchitecture, fineDetail }) {
   const children = preset.family === "conifer" ? 2 : 2 + (seed >>> 3) % 3;
   for (let child = 0; child < children; child += 1) {
     const side = child % 2 ? 1 : -1;
@@ -236,6 +241,17 @@ function emitSecondaryTwigs({ put, tip, preset, crownRadius, seed, branchArchite
     const droop = preset.branchDroop * length * (0.6 + random01(seed, child + 20));
     const end = [tip.x + Math.cos(angle) * length, tip.y - droop + (child === 2 ? 1 : 0), tip.z + Math.sin(angle) * length];
     emitTaperedLimb({ put, start: [tip.x, tip.y, tip.z], end, palette: preset.twigs, role: "twig", seed: seed ^ child, architecture: branchArchitecture, generation: 1 });
+    const endX = Math.round(end[0]), endY = Math.round(end[1]), endZ = Math.round(end[2]);
+    if (shouldEmitFineDetail(fineDetail, { kind: "terminal", seed: seed ^ child ^ 0x51f15e })) {
+      const terminal = pickFineTwigBlock(fineDetail, { phase: "terminal", seed: seed ^ child });
+      if (terminal) put(endX, endY, endZ, terminal, "twig");
+    }
+    if (shouldEmitFineDetail(fineDetail, { kind: "tertiary", seed: seed ^ child ^ 0x9e3779b9 })) {
+      const v = tertiaryTwigVector({ angle, seed: seed ^ child ^ 0x85ebca6b, family: preset.family });
+      const tertiaryEnd = [endX + Math.cos(v.angle) * v.length, endY + v.dy, endZ + Math.sin(v.angle) * v.length];
+      const tertiaryBlock = pickFineTwigBlock(fineDetail, { phase: "run", seed: seed ^ child ^ 0xc2b2ae35 });
+      if (tertiaryBlock) emitLine(put, [endX, endY, endZ], tertiaryEnd, [tertiaryBlock], "twig", seed ^ child ^ 0x27d4eb2d);
+    }
   }
   const detail = pick(preset.twigs, seed >>> 5);
   if (detail) put(tip.x, tip.y, tip.z, detail, "twig");
@@ -269,7 +285,7 @@ function emitJunctionCollar({ put, centre, radius, palette, seed }) {
 }
 
 function emitCanopyClusters(context) {
-  const { put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry, preset, palette, branchTips, seed, detailLevel, structuralForm, foliageMicrostructure } = context;
+  const { put, x, z, groundY, treeHeight, crownBase, crownRadius, crownGeometry, preset, palette, branchTips, seed, detailLevel, structuralForm, foliageMicrostructure, fineDetail } = context;
   const clusterScale = detailLevel === "medium" ? 0.82 : 1;
   const crownHeight = Math.max(2, treeHeight - crownBase + 1);
   const liveTipFraction = clamp(Number(foliageMicrostructure?.liveTipFraction) || 1, 0.45, 1);
@@ -315,6 +331,10 @@ function emitCanopyClusters(context) {
     const pz = Math.round(z + crownGeometry.offsetZ * shift + Math.sin(angle) * radius);
     const shellRough = (hash3d(px, y, pz, seed ^ 0x27d4eb2d) % 1000) / 1000;
     if (shellRough > (foliageMicrostructure?.density || 0.75)) continue;
+    if (shouldEmitFineDetail(fineDetail, { kind: "edge", seed: hash3d(px, y, pz, seed) })) {
+      const edge = pickFineTwigBlock(fineDetail, { phase: "edge", seed: hash3d(px, y, pz, seed ^ 0x7f4a7c15) });
+      if (edge) { put(px, y, pz, edge, "twig"); continue; }
+    }
     put(px, y, pz, pick(palette, hash3d(px, y, pz, seed)), "leaf");
   }
 }
