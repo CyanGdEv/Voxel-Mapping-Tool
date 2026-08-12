@@ -1,0 +1,41 @@
+name: Generation CPU patch
+
+on:
+  push:
+    branches:
+      - agent/maximize-generation-cpu
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/maximize-generation-cpu
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Apply CPU configuration
+        run: node scripts/patch-generation-cpu.mjs
+      - name: Validate workflow markers
+        run: |
+          grep -q "TPMAP_GENERATION_RUNNER" .github/workflows/generate-themepark.yml
+          grep -q "TPMAP_CPU_WORKERS" .github/workflows/generate-themepark.yml
+          grep -q "GDAL_NUM_THREADS=ALL_CPUS" .github/workflows/generate-themepark.yml
+          grep -q "UV_THREADPOOL_SIZE" .github/workflows/generate-themepark.yml
+      - name: Commit integration
+        run: |
+          if git diff --quiet -- .github/workflows/generate-themepark.yml; then
+            echo "Already integrated"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/generate-themepark.yml
+          git commit -m "Use all available generation CPU cores"
+          git push origin HEAD:agent/maximize-generation-cpu
