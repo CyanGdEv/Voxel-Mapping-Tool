@@ -19,10 +19,54 @@ test("reconstructs asymmetric connected crown and rejects neighbouring component
   assert.ok(crown);
   assert.equal(crown.sampleCount, 30);
   assert.equal(crown.disconnectedSamplesRejected, 9);
+  assert.equal(crown.touchingSamplesRejected, 0);
   assert.ok(crown.eastM > crown.westM);
   assert.ok(crown.offsetXM > 0);
   assert.equal(crown.crownBaseHeightM, null);
   assert.equal(crown.crownBaseObserved, false);
+});
+
+test("seeded watershed separates touching crowns at a DSM-DTM height saddle", () => {
+  const samples = [];
+  for (let z = -3; z <= 3; z += 1) {
+    for (let x = -4; x <= 10; x += 1) {
+      const left = 13 - Math.hypot(x, z) * 1.35;
+      const right = 12.5 - Math.hypot(x - 6, z) * 1.25;
+      const canopyHeightM = Math.max(left, right);
+      if (canopyHeightM >= 2) samples.push({ x, z, canopyHeightM });
+    }
+  }
+  const leftCrown = reconstructTreeCrownFromSamples({
+    x: 0, z: 0, samples, cellSizeM: 1,
+    competitorSeeds: [{ x: 6, z: 0 }]
+  });
+  const rightCrown = reconstructTreeCrownFromSamples({
+    x: 6, z: 0, samples, cellSizeM: 1,
+    competitorSeeds: [{ x: 0, z: 0 }]
+  });
+  assert.ok(leftCrown && rightCrown);
+  assert.equal(leftCrown.source, "dsm-dtm-seeded-watershed");
+  assert.equal(leftCrown.watershedCompetitors, 1);
+  assert.ok(leftCrown.touchingSamplesRejected > 0);
+  assert.ok(rightCrown.touchingSamplesRejected > 0);
+  assert.ok(leftCrown.eastM < 6.5);
+  assert.ok(rightCrown.westM < 6.5);
+  assert.ok(leftCrown.watershedBoundaryCells > 0);
+  assert.ok(Number.isFinite(leftCrown.watershedMinSaddleHeightM));
+});
+
+test("watershed ignores mapped competitors that are not in the sampled canopy component", () => {
+  const samples = [];
+  for (let z = -2; z <= 2; z += 1) for (let x = -2; x <= 2; x += 1) {
+    samples.push({ x, z, canopyHeightM: 9 });
+  }
+  const crown = reconstructTreeCrownFromSamples({
+    x: 0, z: 0, samples, cellSizeM: 1,
+    competitorSeeds: [{ x: 20, z: 20 }]
+  });
+  assert.equal(crown.source, "dsm-dtm-connected-canopy");
+  assert.equal(crown.watershedCompetitors, 0);
+  assert.equal(crown.sampleCount, 25);
 });
 
 test("uses explicit vegetation-base observations but never invents them from DSM-DTM", () => {
