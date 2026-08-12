@@ -1,4 +1,5 @@
 import { detectTreeSeedsFromCanopySamples } from "./tree-seed-detection.mjs";
+import { resolveLocalSpeciesDiversity } from "./woodland-species-diversity.mjs";
 
 const DEFAULTS = Object.freeze({
   sampleStepM: 1,
@@ -74,7 +75,15 @@ export function inferIndividualTreesInVegetation(map, sources = {}, options = {}
     for (let index = 0; index < seeds.length && inferred.length < totalLimit; index += 1) {
       const seed = seeds[index];
       if (!pointInGeometry(seed.x, seed.z, feature.localGeometry)) continue;
-      const speciesEvidence = resolveSpeciesEvidence({
+      const speciesEvidence = resolveLocalSpeciesDiversity({
+        x: seed.x,
+        z: seed.z,
+        parent: feature,
+        speciesSources,
+        mappedTrees: mappedTreeFeatures,
+        radiusM: Number(options.treeInferenceNearbySpeciesRadiusM) || DEFAULTS.nearbySpeciesRadiusM * 1.7,
+        seedKey: String(feature.id || "vegetation")
+      }) || resolveSpeciesEvidence({
         x: seed.x,
         z: seed.z,
         parent: feature,
@@ -93,6 +102,7 @@ export function inferIndividualTreesInVegetation(map, sources = {}, options = {}
       if (speciesEvidence?.leafType) tags.leaf_type = speciesEvidence.leafType;
       if (speciesEvidence?.source) tags["tpmap:species_source"] = speciesEvidence.source;
       if (Number.isFinite(speciesEvidence?.confidence)) tags["tpmap:species_confidence"] = String(round3(speciesEvidence.confidence));
+      if (Array.isArray(speciesEvidence?.distribution) && speciesEvidence.distribution.length > 1) tags["tpmap:species_distribution"] = speciesEvidence.distribution.map((entry) => `${entry.species || entry.genus || entry.leafType}:${round3(entry.weight)}`).join(",");
 
       inferred.push({
         id: `lidar-tree:${safeId(feature.id || "vegetation")}:${index}:${Math.round(seed.x * 10)}:${Math.round(seed.z * 10)}`,
