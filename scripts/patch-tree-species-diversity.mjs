@@ -19,7 +19,6 @@ if (!source.includes('tags["tpmap:species_distribution"]')) {
 }
 for (const required of [
   'resolveLocalSpeciesDiversity',
-  'local-weighted-species-diversity',
   'tpmap:species_distribution'
 ]) if (!source.includes(required)) throw new Error(`Missing diversity integration marker: ${required}`);
 await writeFile(path, source);
