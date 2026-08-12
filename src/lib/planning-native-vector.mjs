@@ -3,22 +3,27 @@ import {
   looksLikeAsciiDxf as looksLikeStrictAsciiDxf
 } from "./planning-native-dxf.mjs";
 import { extractNativeIfcPlanning, looksLikeIfc } from "./planning-native-ifc.mjs";
+import { extractNativeDwgPlanning, looksLikeDwg } from "./planning-native-dwg.mjs";
 
 /**
- * Native planning entrypoint retained for compatibility with planning-discovery.
- * The discovery MIME probe historically asks `looksLikeAsciiDxf` before its IFC
- * branch and discards non-DXF source bytes. Treat text IFC as a native-vector
- * candidate here so it stays on the lossless path and is routed to the IFC
- * decoder rather than rasterised or merely inventoried.
+ * Compatibility entrypoint used by planning-discovery. Native IFC and DWG are
+ * deliberately recognized here as well as strict ASCII DXF so discovery keeps
+ * their source bytes on the lossless native-document path. Each format is then
+ * routed to its own conservative decoder.
  */
 export function extractNativeDxfPlanning(args) {
-  return looksLikeIfc(args?.bytes)
-    ? extractNativeIfcPlanning(args)
-    : extractStrictDxfPlanning(args);
+  if (looksLikeIfc(args?.bytes)) return extractNativeIfcPlanning(args);
+  if (looksLikeDwg(args?.bytes)) return extractNativeDwgPlanning(args);
+  return extractStrictDxfPlanning(args);
 }
 
 export function looksLikeAsciiDxf(bytes) {
-  return looksLikeStrictAsciiDxf(bytes) || looksLikeIfc(bytes);
+  return looksLikeStrictAsciiDxf(bytes) || looksLikeIfc(bytes) || looksLikeDwg(bytes);
 }
 
-export { extractStrictDxfPlanning, looksLikeStrictAsciiDxf };
+export {
+  extractStrictDxfPlanning,
+  looksLikeStrictAsciiDxf,
+  extractNativeDwgPlanning,
+  looksLikeDwg
+};
