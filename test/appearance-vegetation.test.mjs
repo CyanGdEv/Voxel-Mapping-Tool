@@ -198,3 +198,30 @@ test("rights-cleared aerial canopy fills unmapped tree-cover gaps", async () => 
   assert.ok(compilation.meta.verticalStats.aerialCanopyModels > 0);
   assert.equal(compilation.meta.verticalStats.treeModels, compilation.meta.verticalStats.aerialCanopyModels);
 });
+
+
+test("mapped touching trees use each other as LiDAR watershed seeds", () => {
+  const left = {
+    id: "tree:left", kind: "vegetation", subtype: "tree", tags: {},
+    localGeometry: { type: "Point", coordinates: [0, 0] }, source: { provider: "fixture" }
+  };
+  const right = {
+    id: "tree:right", kind: "vegetation", subtype: "tree", tags: {},
+    localGeometry: { type: "Point", coordinates: [6, 0] }, source: { provider: "fixture" }
+  };
+  const canopy = (x, z) => Math.max(13 - Math.hypot(x, z) * 1.35, 12.5 - Math.hypot(x - 6, z) * 1.25, 0);
+  const elevation = {
+    resolutionM: 1,
+    samplePairLocal(x, z) {
+      const height = canopy(x, z);
+      return { terrain: 100, surface: 100 + height };
+    }
+  };
+  const map = { features: [left, right] };
+  enrichUniversalFidelity(map, { elevation }, { accuracyMode: "verified", treeCrownSearchRadiusM: 9 });
+  assert.equal(left.fidelity.tree.crownShapeSource, "dsm-dtm-seeded-watershed");
+  assert.equal(right.fidelity.tree.crownShapeSource, "dsm-dtm-seeded-watershed");
+  assert.ok(left.fidelity.tree.touchingSamplesRejected > 0);
+  assert.ok(right.fidelity.tree.touchingSamplesRejected > 0);
+  assert.equal(map.fidelity.trees.watershedSeparated, 2);
+});
