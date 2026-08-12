@@ -9,7 +9,7 @@ const VALUE_FLAGS = new Set([
   "planning", "planning-manifest", "planning-world-authority", "max-planning-document-mb",
   "planit-url", "max-planning-applications", "max-planning-documents",
   "max-planning-pages-per-document", "planning-georef-min-confidence", "planning-plan",
-  "planning-shard-index", "planning-shard-count",
+  "planning-shard-index", "planning-shard-count", "prepared-planning-directory",
   "planning-datasets", "planning-data-url", "trees-outside-woodland-url",
   "trees-outside-woodland-collection", "microsoft-buildings-index-url",
   "microsoft-buildings-min-confidence", "wikidata-url", "wikidata-limit",

@@ -1,8 +1,8 @@
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, rm } from "node:fs/promises";
-import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256File } from "./io.mjs";
+import { readFile, readdir, rm } from "node:fs/promises";
+import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
 import {
   autoGeoreferencePlanningPage,
@@ -26,7 +26,8 @@ const MAX_DOCUMENTS_HARD = 500;
 const MAX_PAGES_HARD = 50;
 const MAX_PLANIT_CANDIDATE_SCAN = 600;
 const APPLICATION_CRAWL_CONCURRENCY = 4;
-const DOCUMENT_PROCESS_CONCURRENCY = 3;
+const DOCUMENT_PROCESS_CONCURRENCY = 4;
+const PREPARED_SHARD_MARKER = "TPMAP_PREPARED_PLANNING_SHARD_V1";
 const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
 const DOCUMENT_REQUEST_TIMEOUT_MS = 120_000;
 const PORTAL_RETRIES = 1;
@@ -101,18 +102,37 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
   const limits = discoveryLimits(options);
   let processed = 0, acquired = 0, rawDocumentCacheHits = 0, pageResults = 0;
   const failures = [];
-  await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
-    const value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits);
+  const entries = await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+    const value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
     processed += 1;
     if (value.evidence.acquired) acquired += 1;
     if (value.evidence.cacheHit) rawDocumentCacheHits += 1;
     pageResults += value.evidence.extraction.length;
     failures.push(...value.failures);
     emitProgress(runtime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
+    return {
+      identity: planningDocumentIdentity({ document, application }),
+      document,
+      application,
+      evidence: value.evidence,
+      candidateCollection: value.candidateCollection,
+      failures: value.failures,
+      warnings: value.warnings
+    };
   });
+  const bundle = {
+    schemaVersion: 1,
+    marker: PREPARED_SHARD_MARKER,
+    parkId: plan.parkId,
+    planSha256: sha256(plan),
+    shardIndex,
+    shardCount,
+    entries
+  };
+  const output = options.out ? await writeJson(path.resolve(options.out), bundle, 0) : null;
   return {
     schemaVersion: 1, parkId: plan.parkId, shardIndex, shardCount,
-    assigned: queue.length, processed, acquired, rawDocumentCacheHits, pageResults, failures
+    assigned: queue.length, processed, acquired, rawDocumentCacheHits, pageResults, failures, output
   };
 }
 
@@ -127,14 +147,28 @@ async function processAutomaticPlanningPlan(plan, options, planningRuntime) {
   result.applications.push(...plan.applications);
   const documentQueue = plan.documentQueue.slice(0, limits.documents);
 
-  let processedCount = 0;
-  const processedDocuments = await mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
-    const processed = await processPlanningDocument(document, application, profile, options, planningRuntime, limits);
-    processedCount += 1;
-    emitProgress(planningRuntime,
-      `Planning extraction: ${processedCount}/${documentQueue.length} document(s), ${processed.evidence.extraction.length} page result(s) in latest document`);
-    return processed;
-  });
+  let processedDocuments = null;
+  if (options.preparedPlanningDirectory) {
+    try {
+      processedDocuments = await loadPreparedPlanningDocuments(
+        path.resolve(options.preparedPlanningDirectory), plan, documentQueue, options, planningRuntime, limits
+      );
+      emitProgress(planningRuntime,
+        `Planning extraction: reused ${processedDocuments.length}/${documentQueue.length} prepared document result(s)`);
+    } catch (error) {
+      result.warnings.push(`Prepared planning handoff was not reusable (${error.message}); cached documents will be processed normally.`);
+    }
+  }
+  if (!processedDocuments) {
+    let processedCount = 0;
+    processedDocuments = await mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+      const processed = await processPlanningDocument(document, application, profile, options, planningRuntime, limits);
+      processedCount += 1;
+      emitProgress(planningRuntime,
+        `Planning extraction: ${processedCount}/${documentQueue.length} document(s), ${processed.evidence.extraction.length} page result(s) in latest document`);
+      return processed;
+    });
+  }
   for (let index = 0; index < processedDocuments.length; index += 1) {
     const processed = processedDocuments[index];
     const { document, application } = documentQueue[index];
@@ -173,6 +207,61 @@ async function processAutomaticPlanningPlan(plan, options, planningRuntime) {
     );
   }
   return result;
+}
+
+async function loadPreparedPlanningDocuments(directory, plan, documentQueue, options, runtime, limits) {
+  const filenames = (await readdir(directory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.join(directory, entry.name))
+    .sort();
+  if (!filenames.length) throw new Error("no prepared shard bundles were found");
+  const bundles = await Promise.all(filenames.map(readJson));
+  const expectedPlanHash = sha256(plan);
+  const shardCount = bundles[0]?.shardCount;
+  if (!Number.isInteger(shardCount) || shardCount < 1 || bundles.length !== shardCount) {
+    throw new Error(`expected ${shardCount || "all"} shard bundles but found ${bundles.length}`);
+  }
+  const shardIndexes = new Set();
+  const byIdentity = new Map();
+  for (const bundle of bundles) {
+    if (bundle?.schemaVersion !== 1 || bundle?.marker !== PREPARED_SHARD_MARKER ||
+      bundle.parkId !== plan.parkId || bundle.planSha256 !== expectedPlanHash || bundle.shardCount !== shardCount) {
+      throw new Error("prepared shard metadata does not match the frozen planning plan");
+    }
+    if (!Number.isInteger(bundle.shardIndex) || bundle.shardIndex < 0 || bundle.shardIndex >= shardCount ||
+      shardIndexes.has(bundle.shardIndex) || !Array.isArray(bundle.entries)) {
+      throw new Error("prepared shard indexes or entries are invalid");
+    }
+    shardIndexes.add(bundle.shardIndex);
+    for (const entry of bundle.entries) {
+      if (!entry?.identity || byIdentity.has(entry.identity)) throw new Error("prepared document identity is missing or duplicated");
+      byIdentity.set(entry.identity, entry);
+    }
+  }
+  const expectedIdentities = documentQueue.map(planningDocumentIdentity);
+  if (byIdentity.size !== expectedIdentities.length || expectedIdentities.some((identity) => !byIdentity.has(identity))) {
+    throw new Error(`prepared coverage ${byIdentity.size}/${expectedIdentities.length} does not exactly match the plan`);
+  }
+
+  let completed = 0;
+  return mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+    const entry = byIdentity.get(planningDocumentIdentity({ document, application }));
+    let processed;
+    if (!entry.evidence?.acquired || (entry.failures || []).some((item) => item.adapter === "planning-page-extraction")) {
+      processed = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits);
+    } else {
+      processed = finalizePlanningDocument({
+        evidence: { ...entry.evidence, preparedShardHit: true },
+        candidateCollection: entry.candidateCollection,
+        sourceFile: null,
+        failures: [...(entry.failures || [])],
+        warnings: [...(entry.warnings || [])]
+      }, application, document, runtime);
+    }
+    completed += 1;
+    emitProgress(runtime, `Planning prepared handoff: ${completed}/${documentQueue.length} document(s)`);
+    return processed;
+  });
 }
 
 export function selectPlanningShard(documentQueue, shardIndex, shardCount) {
@@ -401,7 +490,7 @@ async function crawlApplicationDocuments(applicationInput, profile, options, run
   return { application, documents: ranked, failures, warnings };
 }
 
-async function processPlanningDocument(document, application, profile, options, runtime, limits) {
+async function processPlanningDocument(document, application, profile, options, runtime, limits, deferEligibility = false) {
   const failures = [], warnings = [];
   let sourceFile = null, sourceHash = null, sizeBytes = null, sourceMime = null;
   const evidence = {
@@ -444,7 +533,7 @@ async function processPlanningDocument(document, application, profile, options, 
   } catch (error) {
     if (sourceFile) await rm(sourceFile, { force: true }).catch(() => {});
     failures.push(failure("official-document", document.url, error, application.reference));
-    return { evidence, collection: null, sourceFile, failures, warnings };
+    return { evidence, collection: null, candidateCollection: null, sourceFile, failures, warnings };
   }
 
   const pageCount = await documentPageCount(sourceFile, sourceMime);
@@ -474,19 +563,31 @@ async function processPlanningDocument(document, application, profile, options, 
   }
 
   const collection = { type: "FeatureCollection", features };
-  const eligibility = corroborateAutomaticPlanningCollection(collection, {
+  evidence.derivedCollectionsDeclared = features.length ? 1 : 0;
+  const processed = { evidence, collection: null, candidateCollection: collection, sourceFile, failures, warnings };
+  return deferEligibility ? processed : finalizePlanningDocument(processed, application, document, runtime);
+}
+
+function finalizePlanningDocument(processed, application, document, runtime) {
+  const { evidence, candidateCollection, warnings } = processed;
+  if (!candidateCollection) return processed;
+  const features = candidateCollection.features || [];
+  const eligibility = corroborateAutomaticPlanningCollection(candidateCollection, {
     ...application,
     proposal: `${application.proposal || ""} ${document.title || ""} ${document.role || ""}`
   }, runtime);
   evidence.worldEligible = eligibility.worldEligible && features.length > 0;
   evidence.worldEligibilityBasis = eligibility.basis;
   evidence.currentStateCorroboration = eligibility;
-  evidence.derivedCollectionsDeclared = features.length ? 1 : 0;
   evidence.derivedCollectionsAccepted = evidence.worldEligible ? 1 : 0;
   if (features.length && !evidence.worldEligible) warnings.push(
     `${application.reference || "unknown"} ${document.title}: extracted geometry stayed evidence-only because current-state corroboration did not pass.`
   );
-  return { evidence, collection: evidence.worldEligible ? collection : null, sourceFile, failures, warnings };
+  return { ...processed, collection: evidence.worldEligible ? candidateCollection : null };
+}
+
+function planningDocumentIdentity({ document, application }) {
+  return sha256(`${application?.reference || "unknown"}\n${document?.id || "unknown"}\n${document?.url || ""}`);
 }
 
 function automaticResult(profile) {

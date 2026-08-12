@@ -56,6 +56,8 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(workflow, /planning-shard-count 20/);
   assert.match(workflow, /merge-multiple: true/);
   assert.match(workflow, /--planning-plan planning-plan\.json/);
+  assert.match(workflow, /--prepared-planning-directory \.tpmap-cache\/prepared-planning/);
+  assert.match(workflow, /\.tpmap-cache\/prepared-planning\/shard-\$\{\{ matrix\.shard \}\}\.json/);
 });
 
 test("parallel planning shards cover every document exactly once", () => {

@@ -92,6 +92,7 @@ jobs:
           --planning-plan planning-plan.json
           --planning-shard-index ${{ matrix.shard }}
           --planning-shard-count 20
+          --out .tpmap-cache/prepared-planning/shard-${{ matrix.shard }}.json
       - name: Upload content-addressed planning shard
         uses: actions/upload-artifact@v7
         with:
@@ -99,6 +100,7 @@ jobs:
           path: |
             .tpmap-cache/planning-documents/**
             .tpmap-cache/prepared-generator/planning-raster-derivatives-v1/**
+            .tpmap-cache/prepared-planning/**
           include-hidden-files: true
           compression-level: 0
           if-no-files-found: error
@@ -182,6 +184,7 @@ jobs:
             --strict
             --no-addon
             --planning-plan planning-plan.json
+            --prepared-planning-directory .tpmap-cache/prepared-planning
             --out "$OUTPUT_DIR"
           )
           node src/cli.mjs "${args[@]}"
