@@ -6,15 +6,15 @@ const MAX_ARCHIVE_ENTRIES = 512;
 const MAX_RELEVANT_MEMBERS = 128;
 const MAX_NATIVE_MEMBER_BYTES = 64 * 1024 * 1024;
 const MAX_NATIVE_TOTAL_BYTES = 192 * 1024 * 1024;
-const NATIVE_EXTENSIONS = new Set([".dxf", ".ifc"]);
+const NATIVE_EXTENSIONS = new Set([".dwg", ".dxf", ".ifc"]);
 const RELEVANT_EXTENSIONS = new Set([
   ".dwg", ".dxf", ".ifc", ".ifczip", ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".zip"
 ]);
 
 /**
- * Safely inventories an official planning ZIP and decodes embedded DXF/IFC
- * members without writing archive paths to disk. Non-decoded CAD/raster files
- * remain explicit evidence inventory for later conversion/reconciliation.
+ * Safely inventories an official planning ZIP and decodes embedded DWG/DXF/IFC
+ * members without writing archive paths to disk. Other CAD/raster files remain
+ * explicit evidence inventory for later conversion/reconciliation.
  */
 export function extractNativePlanningArchive({
   bytes,
@@ -25,7 +25,8 @@ export function extractNativePlanningArchive({
   maxEntries = MAX_ARCHIVE_ENTRIES,
   maxRelevantMembers = MAX_RELEVANT_MEMBERS,
   maxNativeMemberBytes = MAX_NATIVE_MEMBER_BYTES,
-  maxNativeTotalBytes = MAX_NATIVE_TOTAL_BYTES
+  maxNativeTotalBytes = MAX_NATIVE_TOTAL_BYTES,
+  nativeDecoderOptions = {}
 }) {
   const archiveBytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
   let entryCount = 0;
@@ -94,6 +95,7 @@ export function extractNativePlanningArchive({
         archiveMember: name
       };
       const extracted = extractNativeDxfPlanning({
+        ...nativeDecoderOptions,
         bytes: member,
         application,
         document: nestedDocument,

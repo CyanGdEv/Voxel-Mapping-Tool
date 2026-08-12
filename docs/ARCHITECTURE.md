@@ -5,7 +5,7 @@
 1. Load one of the five bounded park profiles.
 2. Query PlanIt within the park bounding box and independently search the configured official council portal; merge and deduplicate application references.
 3. Follow official application/document links, rank relevant drawings, download them into the private content-addressed cache, and record hashes/provenance.
-4. Parse native ASCII DXF model geometry directly when supplied; otherwise render bounded PDF/image pages, OCR scale and semantic labels, recover contours/lines, and align planning geometry using the drawing red-line/site boundary and official application location. DWG/IFC/ZIP evidence is cached and inventoried without pretending it was decoded.
+4. Prefer native planning geometry before raster extraction: parse ASCII DXF directly, decode supported IFC extrusions/placements, expand bounded ZIP bundles, and convert native DWG through pinned GNU LibreDWG `dwg2dxf` into a transient ASCII DXF that is immediately passed through the same strict native DXF parser. Unsupported/ambiguous CAD/BIM members remain evidence inventory. Only when no usable native geometry exists are bounded PDF/image pages rendered, OCR/vector semantics recovered, and planning geometry aligned using the drawing red-line/site boundary and official application location.
 5. Promote only confidence-gated geometry from accepted applications with current-state/as-built evidence or independent DSM structural corroboration. Manual manifests remain an expert override.
 6. Acquire OSM for coordinate registration and QA, plus public elevation, vegetation, water and imagery sources.
 7. Normalize accepted geometry to WGS84 and a local metre grid.
@@ -20,6 +20,8 @@
 - No node in a planning-only reconstruction graph may be OSM-derived.
 - Temporary/red construction fences and `planning_exclude_from_world` features are excluded.
 - A document derivative is not world eligible because its application was merely approved. Automatic promotion additionally requires as-built/current-state language or independent DSM structural corroboration; manual derivatives require an explicit reviewed decision.
+- Native CAD conversion never changes evidence identity: the original official DWG hash remains authoritative provenance, while converted DXF hashes are recorded only as intermediate transformation evidence.
+- Missing/failed DWG conversion, unsupported IFC geometry, unsafe ZIP members and unregistered native geometry remain evidence-only; they are never rasterized or guessed into world authority merely because a native file exists.
 - A missing elevation stays null until planning, survey, DTM/DSM or traceable interpolation resolves it.
 - Interpolation is bounded between compatible ride anchors; no end extrapolation is performed.
 - Every named polygonal building/structure accepted into the compiler receives a native Bedrock sign.

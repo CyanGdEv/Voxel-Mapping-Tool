@@ -41,6 +41,8 @@ function extract(bytes, overrides = {}) {
     document: { id: "planning-bim-bundle", title: "Approved BIM bundle", role: "site-layout" },
     profile,
     minimumConfidence: 0.72,
+    // Keep archive unit tests independent of an installed LibreDWG binary.
+    nativeDecoderOptions: { converterPath: "/definitely/missing/tpmap-dwg2dxf" },
     ...overrides
   });
 }
@@ -55,7 +57,7 @@ test("planning ZIP decodes embedded IFC and preserves archive-member provenance"
   assert.equal(result.status, "native-archive-geometry-ready");
   assert.equal(result.archive.entries, 3);
   assert.equal(result.archive.relevantMembers, 3);
-  assert.equal(result.archive.nativeMembersDecoded, 1);
+  assert.equal(result.archive.nativeMembersDecoded, 2);
   assert.equal(result.collection.features.length, 1);
   const feature = result.collection.features[0];
   assert.equal(feature.properties.kind, "building");
@@ -63,11 +65,11 @@ test("planning ZIP decodes embedded IFC and preserves archive-member provenance"
   assert.equal(feature.properties.planning_archive_member, "CAD/station.ifc");
   assert.equal(feature.properties.planning_archive_container_id, "planning-bim-bundle");
   const dwg = result.archive.members.find((item) => item.name === "CAD/model.dwg");
-  assert.equal(dwg.status, "inventoried");
-  assert.equal(dwg.nativeDecodable, false);
+  assert.equal(dwg.status, "native-dwg-converter-unavailable");
+  assert.equal(dwg.nativeDecodable, true);
 });
 
-test("planning ZIP with no decodable native geometry remains explicit inventory", () => {
+test("planning ZIP with unavailable DWG conversion remains explicit evidence", () => {
   const bytes = zipSync({
     "CAD/site.dwg": strToU8("AC1027 inventory only"),
     "Schedules/materials.pdf": strToU8("evidence")
@@ -76,6 +78,8 @@ test("planning ZIP with no decodable native geometry remains explicit inventory"
   assert.equal(result.status, "native-archive-inventoried-no-geometry");
   assert.equal(result.collection.features.length, 0);
   assert.equal(result.archive.relevantMembers, 2);
+  assert.equal(result.archive.members.find((item) => item.name === "CAD/site.dwg").status,
+    "native-dwg-converter-unavailable");
 });
 
 test("planning ZIP rejects traversal paths before promoting archive geometry", () => {
