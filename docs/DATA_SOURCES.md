@@ -24,6 +24,8 @@ Council registers and their drawings are the authoritative records. The automati
 
 PlanIt prevents the workflow from depending on one council search form, but an application is useful for reconstruction only when its documents resolve back to an allowlisted official council host. The generated world never treats PlanIt, a search result, or OSM as planning geometry.
 
+Native planning formats are handled before raster extraction where possible. ASCII DXF is parsed directly; supported IFC extrusions and placements are decoded directly; ZIP bundles are safely inspected in memory and embedded IFC/DXF/DWG members are routed through the same native evidence path. DWG is converted with pinned GNU LibreDWG 0.14 `dwg2dxf`, after which the existing strict DXF parser performs semantic classification and registration. The official DWG hash remains the source identity and the intermediate DXF hash is retained only as conversion provenance. Unsupported BIM/CAD geometry, failed conversions and unsafe archive members remain evidence-only.
+
 ## National and environmental sources
 
 | Source | Use | Integration |
