@@ -10,18 +10,22 @@ test("direct-world module is valid JavaScript", () => {
   const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
-test("appearance palettes are accepted by the direct-world compiler", async () => {
-  const [world, fidelity, aerial, raster] = await Promise.all([
+test("appearance and high-fidelity tree palettes are accepted by the direct-world compiler", async () => {
+  const [world, fidelity, aerial, raster, treePresets, treeGenerator] = await Promise.all([
     readFile(new URL("../src/lib/mcworld.mjs", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/aerial-appearance.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8")
+    readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/tree-presets.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/tree-generator.mjs", import.meta.url), "utf8")
   ]);
   const section = world.slice(world.indexOf("const BEDROCK_BLOCKS"), world.indexOf("export const WORLD_PALETTES"));
   const allowed = blocks(section);
-  const emitted = new Set([...blocks(fidelity), ...blocks(aerial), ...blocks(raster)]);
+  const emitted = new Set([
+    ...blocks(fidelity), ...blocks(aerial), ...blocks(raster),
+    ...blocks(treePresets), ...blocks(treeGenerator)
+  ]);
   emitted.delete("minecraft:overworld");
-  // Namespaced Bedrock state/source-property keys are not block identifiers.
   emitted.delete("minecraft:shape");
   emitted.delete("minecraft:direction");
   const unsupported = [...emitted].filter((b) => !allowed.has(b)).sort();
