@@ -114,8 +114,16 @@ function explicitBoolean(v) {
   return null;
 }
 function first(o, keys) { for (const k of keys) if (o?.[k] != null && o[k] !== "") return o[k]; return null; }
-function finite(v) { const n = Number(v); return Number.isFinite(n) ? n : NaN; }
-function clampInt(v, min, max) { const n = Number(v); return Number.isFinite(n) ? clamp(Math.round(n), min, max) : null; }
+function finite(v) {
+  if (v == null || v === "" || (typeof v === "string" && !v.trim())) return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+function clampInt(v, min, max) {
+  if (v == null || v === "" || (typeof v === "string" && !v.trim())) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? clamp(Math.round(n), min, max) : null;
+}
 function noise(seed, salt) { return (hash(`${seed}:${salt}`) % 10000) / 9999; }
 function boundedNoise(seed, min, max) { return min + noise(seed, 41) * (max - min); }
 function hash(text) { let h = 2166136261 >>> 0; for (const c of String(text)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
