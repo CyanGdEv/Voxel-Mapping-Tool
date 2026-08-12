@@ -15,8 +15,6 @@ export function inferTreeTrunkLean({ heightM, crownDiameterM, tags = {}, reconst
   const offsetZ = finite(reconstruction?.offsetZM, finite(reconstruction?.crownOffsetZM, 0));
   const asymmetry = clamp(finite(reconstruction?.asymmetry, Math.hypot(offsetX, offsetZ) / Math.max(0.5, crown / 2)), 0, 1);
 
-  // A crown offset is useful evidence for growth direction, but not proof that
-  // the stem itself leans. Convert only a bounded fraction into trunk movement.
   const offsetMagnitude = Math.hypot(offsetX, offsetZ);
   let dx = 0, dz = 0;
   if (offsetMagnitude >= 0.75 && asymmetry >= 0.08) {
@@ -27,8 +25,6 @@ export function inferTreeTrunkLean({ heightM, crownDiameterM, tags = {}, reconst
 
   const slope = slopeVector(reconstruction, tags);
   if (slope && slope.grade >= 0.08) {
-    // Trees often bias away from steep uphill pressure / toward open light, but
-    // slope alone is weak evidence. Keep its contribution deliberately small.
     const slopeShift = Math.min(1.25, height * 0.035 * clamp(slope.grade, 0, 0.6));
     dx += slope.dx * slopeShift;
     dz += slope.dz * slopeShift;
@@ -63,11 +59,10 @@ export function inferTreeTrunkLean({ heightM, crownDiameterM, tags = {}, reconst
 
 export function trunkAxisOffsetAt(lean, fraction) {
   const t = clamp(Number(fraction) || 0, 0, 1);
-  // Slightly curved growth rather than a rigid diagonal pole.
   const eased = t * t * (3 - 2 * t);
   return {
-    x: finite(lean?.dxM, 0) * eased,
-    z: finite(lean?.dzM, 0) * eased
+    x: cleanZero(finite(lean?.dxM, 0) * eased),
+    z: cleanZero(finite(lean?.dzM, 0) * eased)
   };
 }
 
@@ -85,7 +80,6 @@ function explicitLean(tags) {
   const boundedAngle = clamp(Math.abs(angle), 0, 25);
   if (boundedAngle < 0.5) return neutral("explicit-lean-angle", true, 0.98);
   const radians = direction * DEG;
-  // Vector direction follows x=east, z=south/world-positive convention.
   const shift = Math.tan(boundedAngle * DEG) * 10;
   return {
     source: "explicit-lean-angle",
@@ -106,7 +100,6 @@ function slopeVector(reconstruction, tags) {
   if (!Number.isFinite(dx) || !Number.isFinite(dz) || !Number.isFinite(grade)) return null;
   const mag = Math.hypot(dx, dz);
   if (mag < 1e-6) return null;
-  // Bias downslope, i.e. opposite the uphill gradient vector.
   return { dx: -dx / mag, dz: -dz / mag, grade: Math.abs(grade) };
 }
 
@@ -128,6 +121,7 @@ function finiteTag(tags, keys) {
   return NaN;
 }
 function finite(value, fallback) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+function cleanZero(value) { return Math.abs(value) < 1e-12 ? 0 : value; }
 function neutral(source = "vertical-default", observed = false, confidence = 1) { return { source, observed, dxM: 0, dzM: 0, topShiftM: 0, angleDeg: 0, confidence }; }
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function round3(value) { return Math.round(value * 1000) / 1000; }
