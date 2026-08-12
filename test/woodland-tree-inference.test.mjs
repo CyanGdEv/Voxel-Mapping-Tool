@@ -104,15 +104,15 @@ test("nearby classified mapped tree transfers species when parent is unclassifie
   assert.equal(evidence.source, "nearby-classified-tree");
 });
 
-test("morphology-only fallback preserves uncertainty instead of inventing a species", () => {
+test("woodland-class fallback preserves uncertainty instead of inventing a species", () => {
   const evidence = resolveSpeciesEvidence({
     x: 5, z: 5, parent: woodland({ natural: "wood", woodland_type: "conifer woodland" }), speciesSources: [], mappedTrees: []
   });
   assert.equal(evidence.species, null);
   assert.equal(evidence.genus, null);
   assert.equal(evidence.leafType, "needleleaved");
-  assert.equal(evidence.source, "parent-vegetation-morphology");
-  assert.ok(evidence.confidence < 0.6);
+  assert.equal(evidence.source, "parent-vegetation-composition");
+  assert.ok(evidence.confidence < 0.9);
 });
 
 test("inferred trees receive species tags and provenance from species evidence", () => {
