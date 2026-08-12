@@ -1189,7 +1189,7 @@ function compileVegetationFeature(context) {
   const modelClass = evidence.modelClass || "tree";
   const stats = {
     models: 0, markers: 0, rows: 0, trunkBlocks: 0, leafBlocks: 0,
-    heightMeasuredOrTagged: 0, heightInferred: 0, crownInferred: 0,
+    heightMeasuredOrTagged: 0, heightInferred: 0, crownInferred: 0, crownShapeObserved: 0, crownBaseObserved: 0,
     polygonFeatures: 0, densityDerivedModels: 0, canopyMatchedModels: 0,
     shrubModels: 0, hedgeFeatures: 0, hedgeBlocks: 0, skippedByLimit: 0
   };
@@ -1278,6 +1278,7 @@ function compileVegetationFeature(context) {
       add, x, z, groundY: elevationY[index], heightM: resolvedHeight.heightM,
       crownDiameterM: evidence.crownDiameterM, leafType: evidence.leafType, species: evidence.species,
       genus: evidence.genus, tags: feature.tags || {},
+      reconstruction: evidence.reconstruction || evidence.canopyGeometry || null,
       leafPalette, seed: seed ^ hashText(`${feature.id}:${x}:${z}`),
       detailLevel: options.treeDetailLevel || "high"
     });
@@ -1285,6 +1286,8 @@ function compileVegetationFeature(context) {
     stats.trunkBlocks += model.trunkBlocks;
     stats.leafBlocks += model.leafBlocks;
     if (!Number.isFinite(evidence.crownDiameterM)) stats.crownInferred += 1;
+    if (model.reconstructionObserved) stats.crownShapeObserved += 1;
+    if (model.crownBaseObserved) stats.crownBaseObserved += 1;
     if (candidate.densityDerived) stats.densityDerivedModels += 1;
     if (["dense-tree-canopy", "vegetation"].includes(candidate.canopy?.class)) stats.canopyMatchedModels += 1;
   }
