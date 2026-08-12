@@ -25,7 +25,8 @@ export function extractNativePlanningArchive({
   maxEntries = MAX_ARCHIVE_ENTRIES,
   maxRelevantMembers = MAX_RELEVANT_MEMBERS,
   maxNativeMemberBytes = MAX_NATIVE_MEMBER_BYTES,
-  maxNativeTotalBytes = MAX_NATIVE_TOTAL_BYTES
+  maxNativeTotalBytes = MAX_NATIVE_TOTAL_BYTES,
+  nativeDecoderOptions = {}
 }) {
   const archiveBytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
   let entryCount = 0;
@@ -94,6 +95,7 @@ export function extractNativePlanningArchive({
         archiveMember: name
       };
       const extracted = extractNativeDxfPlanning({
+        ...nativeDecoderOptions,
         bytes: member,
         application,
         document: nestedDocument,
