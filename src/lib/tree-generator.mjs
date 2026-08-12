@@ -32,8 +32,11 @@ export function compileHighFidelityTreeModel({
   const blocks = new Map();
 
   const put = (px, py, pz, block, role) => {
-    const key = `${Math.round(px)},${Math.round(py)},${Math.round(pz)}`;
-    const next = { x: Math.round(px), y: Math.round(py), z: Math.round(pz), block, role };
+    const rx = Math.round(px), ry = Math.round(py), rz = Math.round(pz);
+    if (ry < groundY + 1 || ry > groundY + treeHeight) return;
+    if (role !== "trunk" && Math.hypot(rx - x, rz - z) > crownRadius + 0.5) return;
+    const key = `${rx},${ry},${rz}`;
+    const next = { x: rx, y: ry, z: rz, block, role };
     const current = blocks.get(key);
     if (!current || priority(role) >= priority(current.role)) blocks.set(key, next);
   };
@@ -56,6 +59,8 @@ export function compileHighFidelityTreeModel({
   if (preset.crownShape === "weeping") {
     emitWeepingCurtains({ put, groundY, treeHeight, crownBase, branchTips, palette, seed: treeSeed });
   }
+
+  put(x, groundY + treeHeight, z, pick(palette, hash3d(x, groundY + treeHeight, z, treeSeed)), "leaf");
 
   const ordered = [...blocks.values()].sort((a, b) => a.y - b.y || a.z - b.z || a.x - b.x);
   const counts = { trunkBlocks: 0, branchBlocks: 0, twigBlocks: 0, leafBlocks: 0, totalBlocks: ordered.length };
@@ -169,7 +174,6 @@ function emitCanopyClusters(context) {
     const radiusY = clamp(Math.round((1 + random01(seed, index * 3 + 2) * 1.4) * clusterScale), 1, 3);
     emitOrganicLeafCluster({ put, centre, radiusX, radiusY, radiusZ, palette, density: preset.canopyDensity, seed: seed ^ index * 2654435761 });
   }
-  // Keep the measured crown envelope legible from a distance without filling it solid.
   const shellSamples = clamp(Math.round(crownRadius * 8), 12, 80);
   for (let i = 0; i < shellSamples; i += 1) {
     const t = random01(seed ^ 0xc2b2ae35, i * 5);
@@ -190,7 +194,7 @@ function emitOrganicLeafCluster({ put, centre, radiusX, radiusY, radiusZ, palett
         const rough = (hash3d(centre.x + dx, centre.y + dy, centre.z + dz, seed) % 1000) / 1000;
         const threshold = 1.06 + (rough - 0.5) * 0.34;
         if (normalized > threshold) continue;
-        if (normalized < 0.34 && rough > density + 0.10) continue; // porous internal canopy
+        if (normalized < 0.34 && rough > density + 0.10) continue;
         if (normalized >= 0.34 && rough > density) continue;
         const px = centre.x + dx, py = centre.y + dy, pz = centre.z + dz;
         put(px, py, pz, pick(palette, hash3d(px, py, pz, seed)), "leaf");
