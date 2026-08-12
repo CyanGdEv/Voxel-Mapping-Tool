@@ -125,6 +125,7 @@ function convertWithLibreDwg(source, converterPath) {
       maxBuffer: 4 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"]
     });
+    if (!existsSync(output)) throw new Error("DWG converter completed without producing DXF output");
     const bytes = readFileSync(output);
     return { bytes, version: converterVersion(converterPath) };
   } finally {
