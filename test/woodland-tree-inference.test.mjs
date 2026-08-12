@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inferIndividualTreesInVegetation } from "../src/lib/woodland-tree-inference.mjs";
+import { inferIndividualTreesInVegetation, resolveSpeciesEvidence } from "../src/lib/woodland-tree-inference.mjs";
 
-function woodland() {
+function woodland(tags = { natural: "wood" }) {
   return {
-    id: "wood:1", kind: "vegetation", subtype: "woodland", tags: { natural: "wood" },
+    id: "wood:1", kind: "vegetation", subtype: "woodland", tags,
     localGeometry: { type: "Polygon", coordinates: [[[0,0],[14,0],[14,10],[0,10],[0,0]]] },
     source: { provider: "planning" }
   };
@@ -66,4 +66,69 @@ test("non-polygon vegetation and missing elevation never create inferred trees",
   const map = { features: [{ id:"hedge:1", kind:"vegetation", subtype:"hedge", localGeometry:{ type:"LineString", coordinates:[[0,0],[10,0]] }, tags:{} }] };
   assert.equal(inferIndividualTreesInVegetation(map, { elevation: elevation([[5,0,10]]) }).added, 0);
   assert.equal(inferIndividualTreesInVegetation({ features:[woodland()] }, {}, {}).added, 0);
+});
+
+test("direct species-map evidence has highest authority", () => {
+  const evidence = resolveSpeciesEvidence({
+    x: 5, z: 5, parent: woodland({ natural: "wood", genus: "Fagus" }), mappedTrees: [],
+    speciesSources: [{
+      properties: { species: "Quercus robur", genus: "Quercus" },
+      localGeometry: { type: "Polygon", coordinates: [[[4,4],[6,4],[6,6],[4,6],[4,4]]] }
+    }]
+  });
+  assert.equal(evidence.species, "Quercus robur");
+  assert.equal(evidence.genus, "Quercus");
+  assert.equal(evidence.source, "tree-species-map");
+  assert.ok(evidence.confidence >= 0.9);
+});
+
+test("parent woodland composition transfers before nearby-tree evidence", () => {
+  const parent = woodland({ natural: "wood", species: "Fagus sylvatica", genus: "Fagus", leaf_type: "broadleaved" });
+  const mappedTrees = [{
+    kind: "vegetation", subtype: "tree", tags: { species: "Betula pendula", genus: "Betula" },
+    localGeometry: { type: "Point", coordinates: [5.5,5] }
+  }];
+  const evidence = resolveSpeciesEvidence({ x: 5, z: 5, parent, speciesSources: [], mappedTrees });
+  assert.equal(evidence.species, "Fagus sylvatica");
+  assert.equal(evidence.source, "parent-vegetation-composition");
+});
+
+test("nearby classified mapped tree transfers species when parent is unclassified", () => {
+  const mappedTrees = [{
+    kind: "vegetation", subtype: "tree", tags: { species: "Betula pendula", genus: "Betula" },
+    localGeometry: { type: "Point", coordinates: [6,5] }
+  }];
+  const evidence = resolveSpeciesEvidence({ x: 5, z: 5, parent: woodland(), speciesSources: [], mappedTrees, nearbyRadiusM: 10 });
+  assert.equal(evidence.species, "Betula pendula");
+  assert.equal(evidence.genus, "Betula");
+  assert.equal(evidence.source, "nearby-classified-tree");
+});
+
+test("morphology-only fallback preserves uncertainty instead of inventing a species", () => {
+  const evidence = resolveSpeciesEvidence({
+    x: 5, z: 5, parent: woodland({ natural: "wood", woodland_type: "conifer woodland" }), speciesSources: [], mappedTrees: []
+  });
+  assert.equal(evidence.species, null);
+  assert.equal(evidence.genus, null);
+  assert.equal(evidence.leafType, "needleleaved");
+  assert.equal(evidence.source, "parent-vegetation-morphology");
+  assert.ok(evidence.confidence < 0.6);
+});
+
+test("inferred trees receive species tags and provenance from species evidence", () => {
+  const map = { features: [woodland()] };
+  const treeSpeciesMap = [{
+    properties: { species: "Quercus robur", genus: "Quercus" },
+    localGeometry: { type: "Polygon", coordinates: [[[0,0],[14,0],[14,10],[0,10],[0,0]]] }
+  }];
+  const result = inferIndividualTreesInVegetation(map, { elevation: elevation([[5,5,13]]), treeSpeciesMap }, {
+    treeInferenceMinPeakProminenceM: 0.8
+  });
+  assert.equal(result.added, 1);
+  assert.equal(result.speciesAssigned, 1);
+  const tree = map.features.find((feature) => feature.inferredTree);
+  assert.equal(tree.tags.species, "Quercus robur");
+  assert.equal(tree.tags.genus, "Quercus");
+  assert.equal(tree.tags["tpmap:species_source"], "tree-species-map");
+  assert.equal(tree.inferredTree.speciesEvidence.source, "tree-species-map");
 });
