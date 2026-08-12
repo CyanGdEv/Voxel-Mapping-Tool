@@ -5,6 +5,7 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
 import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "./planning-native-vector.mjs";
+import { extractNativePlanningArchive } from "./planning-native-archive.mjs";
 import {
   autoGeoreferencePlanningPage,
   corroborateAutomaticPlanningCollection
@@ -248,7 +249,9 @@ async function loadPreparedPlanningDocuments(directory, plan, documentQueue, opt
   return mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
     const entry = byIdentity.get(planningDocumentIdentity({ document, application }));
     let processed;
-    if (!entry.evidence?.acquired || (entry.failures || []).some((item) => item.adapter === "planning-page-extraction")) {
+    const retryExtractionFailure = (entry.failures || []).some((item) =>
+      ["planning-page-extraction", "planning-native-archive-extraction"].includes(item.adapter));
+    if (!entry.evidence?.acquired || retryExtractionFailure) {
       processed = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits);
     } else {
       processed = finalizePlanningDocument({
@@ -537,9 +540,10 @@ async function processPlanningDocument(document, application, profile, options, 
     return { evidence, collection: null, candidateCollection: null, sourceFile, failures, warnings };
   }
 
-  if (sourceMime !== "application/dxf") sourceBytes = null;
+  const directNative = sourceMime === "application/dxf" || sourceMime === "application/ifc";
+  if (!directNative && sourceMime !== "application/zip") sourceBytes = null;
   const features = [];
-  if (sourceMime === "application/dxf") {
+  if (directNative) {
     try {
       const georeferenced = extractNativeDxfPlanning({
         bytes: sourceBytes,
@@ -552,6 +556,21 @@ async function processPlanningDocument(document, application, profile, options, 
       features.push(...georeferenced.collection.features);
     } catch (error) {
       failures.push(failure("planning-native-dxf-extraction", document.url, error, application.reference));
+    }
+  } else if (sourceMime === "application/zip") {
+    try {
+      const extracted = extractNativePlanningArchive({
+        bytes: sourceBytes,
+        application,
+        document,
+        profile,
+        minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
+      });
+      evidence.extraction.push(compactExtraction(extracted));
+      evidence.archive = extracted.archive;
+      features.push(...extracted.collection.features);
+    } catch (error) {
+      failures.push(failure("planning-native-archive-extraction", document.url, error, application.reference));
     }
   } else if (isRasterPlanningDocument(sourceMime)) {
     const pageCount = await documentPageCount(sourceFile, sourceMime);
@@ -792,7 +811,15 @@ function compactExtraction(value) {
     associatedShapes: value.associatedShapes,
     nativeFormat: value.nativeFormat || null,
     registration: value.registration || null,
-    acceptedFeatures: value.collection?.features?.length || 0
+    acceptedFeatures: value.collection?.features?.length || 0,
+    archive: value.archive ? {
+      entries: value.archive.entries,
+      relevantMembers: value.archive.relevantMembers,
+      nativeMembersQueued: value.archive.nativeMembersQueued,
+      nativeMembersDecoded: value.archive.nativeMembersDecoded,
+      nativeBudgetBytes: value.archive.nativeBudgetBytes,
+      members: value.archive.members
+    } : null
   };
 }
 
@@ -809,9 +836,9 @@ function detectDocumentMime(bytes, filename) {
   if (hex.startsWith("ffd8ff")) return "image/jpeg";
   if (hex.startsWith("49492a00") || hex.startsWith("4d4d002a")) return "image/tiff";
   if (hex.startsWith("504b0304")) return "application/zip";
+  if (/ISO-10303-21/i.test(bytes.subarray(0, 256).toString("ascii")) || /\.ifc$/i.test(filename)) return "application/ifc";
   if (looksLikeAsciiDxf(bytes) || /\.dxf$/i.test(filename)) return "application/dxf";
   if (/^AC10\d{2}/.test(bytes.subarray(0, 6).toString("ascii")) || /\.dwg$/i.test(filename)) return "application/vnd.dwg";
-  if (/ISO-10303-21/i.test(bytes.subarray(0, 256).toString("ascii")) || /\.ifc$/i.test(filename)) return "application/ifc";
   if (/\.png$/i.test(filename)) return "image/png";
   if (/\.jpe?g$/i.test(filename)) return "image/jpeg";
   if (/\.tiff?$/i.test(filename)) return "image/tiff";
