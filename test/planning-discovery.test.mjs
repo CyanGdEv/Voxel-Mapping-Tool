@@ -18,6 +18,7 @@ import {
   parsePlanningApplicationPage
 } from "../src/lib/planning-portal-html.mjs";
 import { classifyComprehensivePlanningLabel } from "../src/lib/planning-comprehensive-semantics.mjs";
+import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "../src/lib/planning-native-vector.mjs";
 import { parseArgs } from "../src/lib/args.mjs";
 import { acquirePlanningEvidence } from "../src/lib/planning-manifest.mjs";
 
@@ -105,6 +106,35 @@ test("official portal HTML adapters recover applications, metadata and ranked dr
   assert.equal(parsed.reference, "25/0042/FUL");
   assert.match(parsed.address, /Fixture Park/);
   assert.equal(parsed.decisionDate, "2025-07-10");
+});
+
+test("native ASCII DXF planning drawings retain model-space precision", () => {
+  const dxf = Buffer.from(`0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n6\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n8\nProposed Building Footprint\n70\n1\n10\n0\n20\n0\n10\n20\n20\n0\n10\n20\n20\n10\n10\n0\n20\n10\n0\nTEXT\n8\nAnnotations\n10\n10\n20\n5\n1\nNew station building FFL 95.20m\n0\nENDSEC\n0\nEOF\n`);
+  assert.equal(looksLikeAsciiDxf(dxf), true);
+  const result = extractNativeDxfPlanning({
+    bytes: dxf,
+    application: { reference: "25/0042/FUL", geometry: { type: "Point", coordinates: [0, 51.01] } },
+    document: { id: "station-cad", role: "site-layout" },
+    profile,
+    minimumConfidence: 0.72
+  });
+  assert.equal(result.status, "native-dxf-geometry-ready");
+  assert.equal(result.registration, "local-model-space");
+  assert.ok(result.collection.features.some((feature) => feature.properties.kind === "building"));
+  assert.ok(result.collection.features.every((feature) => feature.properties.planning_georeference_method.startsWith("native-dxf-")));
+  const unregistered = extractNativeDxfPlanning({
+    bytes: dxf, application: { reference: "25/0043/FUL" }, document: { id: "unlocated-cad" }, profile
+  });
+  assert.equal(unregistered.status, "native-dxf-registration-unavailable");
+});
+
+test("native planning file types are discovered and ranked", () => {
+  const documents = extractDocumentLinks(`
+    <a href="drawings/ride-general-arrangement.dxf">Approved ride layout CAD</a>
+    <a href="models/station.ifc">Station building model</a>`,
+  "https://planning.example/application/42", ["planning.example"]);
+  assert.deepEqual(documents.map((document) => path.extname(new URL(document.url).pathname)).sort(), [".dxf", ".ifc"]);
+  assert.ok(documents.every((document) => document.relevant));
 });
 
 test("legacy Idox AppBlobImage links become allowlisted integrity-checkable documents", () => {

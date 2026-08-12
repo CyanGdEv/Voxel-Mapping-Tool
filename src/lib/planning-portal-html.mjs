@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const APPLICATION_LINK = /(?:applicationDetails\.do|ApplicationSearchServlet|StdDetails\.aspx|PlanningPK\.xml|planning\/application)/i;
-const USEFUL_DOCUMENT = /(?:\bplans?\b|drawing|layout|elevation|section|roof|landscap|planting|tree|arbor|material|finish|surface|path|plaza|ride|coaster|track|\bsupport(?:s| structure| layout| detail| foundation)?\b|structure|drain|water|flood|earthwork|level|topograph|survey|boundary|fence|wall|retaining|bridge|tunnel|as[ -]?built|existing)/i;
+const USEFUL_DOCUMENT = /(?:\bplans?\b|drawing|layout|general arrangement|elevation|section|roof|landscap|planting|tree|arbor|material|finish|surface|hardscape|paving|path|plaza|ride|coaster|track|\bsupport(?:s| structure| layout| detail| foundation)?\b|structure|foundation|footing|drain|water|flood|earthwork|level|topograph|survey|boundary|fence|wall|retaining|bridge|tunnel|lighting|street furniture|utilities|services|as[ -]?built|existing)/i;
 const NOISE_DOCUMENT = /(?:application form|planning statement|decision notice|screening opinion|letter of representation|ownership certificate|community infrastructure levy|cil form|consultation response|neighbour letter|site notice|press notice|fee|validation checklist|email|correspondence|committee agenda)/i;
 
 export function extractHtmlLinks(html, baseUrl) {
@@ -70,7 +70,7 @@ function extractNecPublicAccessDocuments(html, baseUrl) {
 function isDirectDocumentLink(value) {
   let url;
   try { url = new URL(value); } catch { return false; }
-  if (/\.(?:pdf|tiff?|png|jpe?g|zip)(?:$|[?#])/i.test(url.pathname)) return true;
+  if (/\.(?:pdf|tiff?|png|jpe?g|zip|dxf|dwg|ifc)(?:$|[?#])/i.test(url.pathname)) return true;
   if (/(?:AttachmentShowServlet|ViewDocument|DownloadFile|download|attachment|viewfile|image)/i.test(url.pathname)) return true;
   return false;
 }
@@ -147,7 +147,7 @@ export function classifyPlanningDocument(title, url = "") {
   else if (/material|finish|surface|paving|path|plaza|hardscape/i.test(value)) role = "materials-and-surfaces";
   else if (/water|drain|flood|pond|lake/i.test(value)) role = "water-and-drainage";
   else if (/wall|fence|barrier|bridge|tunnel|earthwork|retaining/i.test(value)) role = "structures-and-earthworks";
-  const useful = USEFUL_DOCUMENT.test(value) || /\.(?:pdf|tiff?|png|jpe?g|zip)(?:$|[?#])/i.test(url);
+  const useful = USEFUL_DOCUMENT.test(value) || /\.(?:pdf|tiff?|png|jpe?g|zip|dxf|dwg|ifc)(?:$|[?#])/i.test(url);
   const noise = NOISE_DOCUMENT.test(value);
   let score = useful ? 45 : 5;
   if (/approved|decision|condition|as[ -]?built|existing/i.test(value)) score += 25;

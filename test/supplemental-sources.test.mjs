@@ -9,13 +9,17 @@ import { gzipSync } from "node:zlib";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import proj4 from "proj4";
+import { writeArrayBuffer } from "geotiff";
+import { loadTreeSpeciesRaster } from "../src/lib/tree-species-raster.mjs";
 
 test("supplemental CLI flags normalize and retain repeatable files", () => {
   const { options } = parseArgs([
     "build", "--england-open-data", "--microsoft-buildings",
     "--microsoft-buildings-min-confidence", "0.72",
     "--source-config", "a.json", "--source-config", "b.json",
-    "--os-openmap-local", "os.geojson", "--max-supplemental-features", "12000"
+    "--os-openmap-local", "os.geojson", "--max-supplemental-features", "12000",
+    "--os-ngd", "--os-ngd-collections", "building,structure", "--os-ngd-max-collections", "8"
   ]);
   assert.equal(options.englandOpenData, true);
   assert.equal(options.microsoftBuildings, true);
@@ -23,6 +27,9 @@ test("supplemental CLI flags normalize and retain repeatable files", () => {
   assert.deepEqual(options.sourceConfig, ["a.json", "b.json"]);
   assert.deepEqual(options.osOpenMapLocal, ["os.geojson"]);
   assert.equal(options.maxSupplementalFeatures, 12000);
+  assert.equal(options.osNgd, true);
+  assert.equal(options.osNgdCollections, "building,structure");
+  assert.equal(options.osNgdMaxCollections, 8);
 });
 
 test("Microsoft quadkey selection is bounded and CSV parsing is quote-safe", () => {
@@ -67,6 +74,59 @@ test("planning designation zones stay evidence-only rather than spawning trees",
   const feature = __test.standardizePlanningFeature(raw, 0, "https://www.planning.data.gov.uk/entity.geojson");
   assert.equal(feature.properties.kind, "detail");
   assert.equal(feature.properties.subtype, "tree-preservation-zone");
+});
+
+test("registered parks and scheduled monuments are retained as heritage evidence", () => {
+  const endpoint = "https://www.planning.data.gov.uk/entity.geojson";
+  const garden = __test.standardizePlanningFeature({
+    type: "Feature", geometry: { type: "Point", coordinates: [-1.9, 52.98] },
+    properties: { entity: 800, dataset: "park-and-garden", name: "Registered garden" }
+  }, 0, endpoint);
+  const monument = __test.standardizePlanningFeature({
+    type: "Feature", geometry: { type: "Point", coordinates: [-1.9, 52.98] },
+    properties: { entity: 801, dataset: "scheduled-monument", name: "Historic earthwork" }
+  }, 1, endpoint);
+  assert.equal(garden.properties.subtype, "registered-park-and-garden");
+  assert.equal(garden.properties.kind, "detail");
+  assert.equal(monument.properties.subtype, "scheduled-monument");
+});
+
+test("OS NGD feature classification preserves high-detail buildings and field boundaries", () => {
+  assert.deepEqual(__test.classifyOsNgd({ roofShape: "hipped" }, { type: "Polygon" }, { title: "Building Features" }),
+    { kind: "building", subtype: "os-ngd-building" });
+  assert.deepEqual(__test.classifyOsNgd({ descriptiveTerm: "Hedge" }, { type: "LineString" }, { title: "Field Boundaries" }),
+    { kind: "vegetation", subtype: "os-ngd-hedge" });
+});
+
+test("bounded Tree Species Map windows attach classified species and confidence", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "tpmap-species-"));
+  const rasterPath = path.join(root, "species.tif");
+  const legendPath = path.join(root, "legend.json");
+  const values = new Uint8Array(100).fill(7);
+  const buffer = writeArrayBuffer(values, {
+    width: 10, height: 10,
+    ModelPixelScale: [10, 10, 0],
+    ModelTiepoint: [0, 0, 0, 399950, 300050, 0],
+    ProjectedCSTypeGeoKey: 27700
+  });
+  await writeFile(rasterPath, Buffer.from(buffer));
+  await writeFile(legendPath, JSON.stringify({ 7: { species: "Norway spruce", leafType: "needleleaved" } }));
+  const bng = "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs";
+  const [west, south] = proj4(bng, "EPSG:4326", [399970, 299970]);
+  const [east, north] = proj4(bng, "EPSG:4326", [400030, 300030]);
+  const acquired = await loadTreeSpeciesRaster({
+    treeSpeciesMap: rasterPath, treeSpeciesLegend: legendPath, treeSpeciesMinConfidence: 0.8
+  }, { bbox: { west, south, east, north }, cacheDir: path.join(root, "cache") });
+  const [lon, lat] = proj4(bng, "EPSG:4326", [400000, 300000]);
+  assert.deepEqual(acquired.sampler(lon, lat), {
+    classCode: 7, species: "Norway spruce", leafType: "needleleaved",
+    confidence: 0.89, confidenceBasis: "dataset-overall-accuracy"
+  });
+  assert.ok(acquired.evidence.window.width < 10);
+  const reused = await loadTreeSpeciesRaster({ treeSpeciesMap: rasterPath, treeSpeciesLegend: legendPath }, {
+    bbox: { west, south, east, north }, cacheDir: path.join(root, "cache")
+  });
+  assert.equal(reused.evidence.cacheHit, true);
 });
 
 test("gap-fill acquired buildings are withheld when an OSM building already overlaps", async () => {

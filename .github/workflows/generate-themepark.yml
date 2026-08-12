@@ -118,6 +118,10 @@ jobs:
       TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
       TPMAP_SHARED_CACHE_DIR: .tpmap-cache
       TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
+      # Configure these once; workflow users still only choose a park.
+      OS_NGD_API_KEY: ${{ secrets.OS_NGD_API_KEY }}
+      TPMAP_TREE_SPECIES_MAP_URL: ${{ vars.TPMAP_TREE_SPECIES_MAP_URL }}
+      TPMAP_TREE_SPECIES_LEGEND_JSON: ${{ vars.TPMAP_TREE_SPECIES_LEGEND_JSON }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:

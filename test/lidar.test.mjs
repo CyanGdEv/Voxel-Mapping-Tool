@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { writeArrayBuffer } from "geotiff";
-import { createProjectedRasterSampler, readGeoTiffRaster } from "../src/lib/lidar.mjs";
+import { createProjectedRasterSampler, readGeoTiffRaster, selectBestSurveyTiles } from "../src/lib/lidar.mjs";
 import { applyLidarBuildingHeights } from "../src/lib/osm.mjs";
 import { extractRideProfileFromPoints } from "../src/lib/ride-profile.mjs";
 
@@ -41,6 +41,15 @@ test("reads and bilinearly samples an EPSG:27700 metre-grid GeoTIFF", async () =
   assert.equal(sample(101.5, 201.5), 5);
   assert.equal(sample(101, 202), 3);
   assert.equal(sample(99, 202), null);
+});
+
+test("LiDAR archive candidates prefer finest resolution and newest survey", () => {
+  const ranked = selectBestSurveyTiles([
+    { tile: "one-metre", resolutionM: 1, flownTo: "2025-01-01" },
+    { tile: "older-25cm", resolutionM: 0.25, flownTo: "2022-01-01" },
+    { tile: "newer-25cm", resolutionM: 0.25, flownTo: "2024-01-01" }
+  ]);
+  assert.deepEqual(ranked.map((tile) => tile.tile), ["newer-25cm", "older-25cm", "one-metre"]);
 });
 
 test("fills missing building heights from LiDAR while retaining tagged conflicts", () => {

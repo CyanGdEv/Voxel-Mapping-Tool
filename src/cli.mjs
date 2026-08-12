@@ -85,6 +85,14 @@ Supplemental public source fusion
   --wikidata-places                Add bounded CC0 attraction/place labels
   --wikimedia-commons              Record nearby geotagged photo/licence evidence
   --open-aerial-map                Discover open aerial imagery candidates for the bbox
+  --os-ngd                         Use OS NGD detail when OS_NGD_API_KEY is set
+  --os-ngd-collections CSV         Explicit collection IDs; otherwise discover relevant collections
+  --tree-species                   Sample Tree Species Map England over TOW canopies
+  --tree-species-map FILE          Local EPSG:27700 classification GeoTIFF
+  --tree-species-map-url URL       Remote range-readable classification GeoTIFF
+  --tree-species-legend FILE       JSON class-code to species/leaf-type mapping
+  --tree-species-min-confidence .65
+                                    Reject lower-confidence classified pixels
   --source-config FILE             Generic OGC API, ArcGIS or GeoJSON adapter config; repeatable
   --max-supplemental-features 50000
                                     Per-adapter bounded feature safety limit

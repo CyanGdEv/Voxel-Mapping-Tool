@@ -5,7 +5,7 @@
 1. Load one of the five bounded park profiles.
 2. Query PlanIt within the park bounding box and independently search the configured official council portal; merge and deduplicate application references.
 3. Follow official application/document links, rank relevant drawings, download them into the private content-addressed cache, and record hashes/provenance.
-4. Render bounded PDF/image pages, OCR scale and semantic labels, recover contours/lines, and align planning geometry using the drawing red-line/site boundary and official application location.
+4. Parse native ASCII DXF model geometry directly when supplied; otherwise render bounded PDF/image pages, OCR scale and semantic labels, recover contours/lines, and align planning geometry using the drawing red-line/site boundary and official application location. DWG/IFC/ZIP evidence is cached and inventoried without pretending it was decoded.
 5. Promote only confidence-gated geometry from accepted applications with current-state/as-built evidence or independent DSM structural corroboration. Manual manifests remain an expert override.
 6. Acquire OSM for coordinate registration and QA, plus public elevation, vegetation, water and imagery sources.
 7. Normalize accepted geometry to WGS84 and a local metre grid.
@@ -23,6 +23,7 @@
 - A missing elevation stays null until planning, survey, DTM/DSM or traceable interpolation resolves it.
 - Interpolation is bounded between compatible ride anchors; no end extrapolation is performed.
 - Every named polygonal building/structure accepted into the compiler receives a native Bedrock sign.
+- Independent OS NGD geometry cannot override planning geometry; Tree Species Map classes are used only above the configured confidence gate and never fabricate an unmapped tree.
 - Build products are emitted only after evidence reports are written; strict mode can therefore fail while preserving diagnostics.
 
 ## Reconstruction graph
