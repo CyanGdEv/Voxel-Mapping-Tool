@@ -4,6 +4,7 @@ import {
 } from "./surface-material-library.mjs";
 import { polygonArea } from "./geo.mjs";
 import { reconstructTreeCrownFromSamples } from "./tree-reconstruction.mjs";
+import { inferIndividualTreesInVegetation } from "./woodland-tree-inference.mjs";
 
 const PATH_KINDS = new Set(["path", "road"]);
 
@@ -101,6 +102,7 @@ const DEFAULT_MATERIAL_BLOCKS = Object.freeze({
 
 export function enrichUniversalFidelity(map, sources, options = {}) {
   const pathFeatures = map.features.filter((feature) => PATH_KINDS.has(feature.kind));
+  const treeInference = inferIndividualTreesInVegetation(map, sources, options);
   const treeFeatures = map.features.filter((feature) => feature.kind === "vegetation");
   const mappedTreeSeeds = treeFeatures
     .filter((feature) => vegetationModelClass(feature) === "tree")
@@ -148,6 +150,7 @@ export function enrichUniversalFidelity(map, sources, options = {}) {
     pathGeometry: map.pathGeometry,
     pathTopology: map.pathTopology,
     terrainDetails: map.terrainDetails,
+    treeInference,
     trees,
     bridges,
     sourceCapabilities,

@@ -61,3 +61,12 @@ test("Tree Reconstruction V3 is wired from LiDAR evidence through mapped-tree wa
   assert.ok(generator.includes("crownReachFromTrunk(crownGeometry, angle)"));
   assert.ok(generator.includes("insideCrownEnvelope(crownGeometry"));
 });
+
+test("Tree Reconstruction V4 infers unmapped woodland trees before fidelity compilation", async () => {
+  const fidelity = await readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8");
+  assert.ok(fidelity.includes('import { inferIndividualTreesInVegetation } from "./woodland-tree-inference.mjs";'));
+  const inferIndex = fidelity.indexOf("const treeInference = inferIndividualTreesInVegetation(map, sources, options);");
+  const treeIndex = fidelity.indexOf('const treeFeatures = map.features.filter((feature) => feature.kind === "vegetation");');
+  assert.ok(inferIndex >= 0 && treeIndex > inferIndex);
+  assert.ok(fidelity.includes("treeInference,"));
+});
