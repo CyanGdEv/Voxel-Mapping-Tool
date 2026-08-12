@@ -1,0 +1,93 @@
+const PRESETS = Object.freeze({
+  'broadleaf-oak': {
+    family: 'broadleaf', crownShape: 'irregular-round', trunkRatio: 0.50, crownWidthRatio: 0.58,
+    branchStart: 0.32, branchTiers: 4, branchCount: [5, 9], branchDroop: 0.10, canopyDensity: 0.70,
+    trunk: ['minecraft:oak_log'], branches: ['minecraft:oak_log','minecraft:oak_fence','minecraft:oak_stairs','minecraft:oak_slab'],
+    twigs: ['minecraft:oak_fence','minecraft:oak_trapdoor','minecraft:brown_carpet'],
+    leaves: ['minecraft:oak_leaves','minecraft:dark_oak_leaves','minecraft:azalea_leaves','minecraft:birch_leaves']
+  },
+  'ancient-oak': {
+    family: 'broadleaf', crownShape: 'wide-irregular', trunkRatio: 0.42, crownWidthRatio: 0.78,
+    branchStart: 0.22, branchTiers: 5, branchCount: [7, 12], branchDroop: 0.18, canopyDensity: 0.66,
+    trunk: ['minecraft:oak_log','minecraft:dark_oak_log'], branches: ['minecraft:oak_log','minecraft:dark_oak_log','minecraft:oak_fence','minecraft:dark_oak_fence','minecraft:oak_stairs'],
+    twigs: ['minecraft:oak_fence','minecraft:dark_oak_fence','minecraft:oak_trapdoor','minecraft:dark_oak_trapdoor','minecraft:brown_carpet'],
+    leaves: ['minecraft:oak_leaves','minecraft:dark_oak_leaves','minecraft:azalea_leaves']
+  },
+  'beech': {
+    family: 'broadleaf', crownShape: 'oval', trunkRatio: 0.58, crownWidthRatio: 0.52,
+    branchStart: 0.38, branchTiers: 4, branchCount: [5, 8], branchDroop: 0.05, canopyDensity: 0.78,
+    trunk: ['minecraft:birch_log'], branches: ['minecraft:birch_log','minecraft:birch_fence','minecraft:birch_stairs','minecraft:birch_slab'],
+    twigs: ['minecraft:birch_fence','minecraft:birch_trapdoor','minecraft:brown_carpet'], leaves: ['minecraft:birch_leaves','minecraft:oak_leaves','minecraft:azalea_leaves']
+  },
+  'birch': {
+    family: 'broadleaf', crownShape: 'light-oval', trunkRatio: 0.64, crownWidthRatio: 0.38,
+    branchStart: 0.42, branchTiers: 4, branchCount: [4, 7], branchDroop: 0.12, canopyDensity: 0.58,
+    trunk: ['minecraft:birch_log'], branches: ['minecraft:birch_log','minecraft:birch_fence','minecraft:birch_slab'],
+    twigs: ['minecraft:birch_fence','minecraft:birch_trapdoor'], leaves: ['minecraft:birch_leaves','minecraft:azalea_leaves']
+  },
+  'willow': {
+    family: 'broadleaf', crownShape: 'weeping', trunkRatio: 0.48, crownWidthRatio: 0.66,
+    branchStart: 0.30, branchTiers: 4, branchCount: [6, 10], branchDroop: 0.55, canopyDensity: 0.64,
+    trunk: ['minecraft:oak_log'], branches: ['minecraft:oak_log','minecraft:oak_fence','minecraft:oak_stairs'],
+    twigs: ['minecraft:oak_fence','minecraft:oak_trapdoor'], leaves: ['minecraft:oak_leaves','minecraft:azalea_leaves','minecraft:birch_leaves']
+  },
+  'spruce': {
+    family: 'conifer', crownShape: 'conical', trunkRatio: 0.86, crownWidthRatio: 0.38,
+    branchStart: 0.22, branchTiers: 8, branchCount: [5, 8], branchDroop: 0.18, canopyDensity: 0.66,
+    trunk: ['minecraft:spruce_log'], branches: ['minecraft:spruce_log','minecraft:spruce_fence','minecraft:spruce_stairs','minecraft:spruce_slab'],
+    twigs: ['minecraft:spruce_fence','minecraft:spruce_trapdoor'], leaves: ['minecraft:spruce_leaves','minecraft:dark_oak_leaves']
+  },
+  'pine': {
+    family: 'conifer', crownShape: 'open-conifer', trunkRatio: 0.82, crownWidthRatio: 0.42,
+    branchStart: 0.46, branchTiers: 6, branchCount: [4, 7], branchDroop: 0.06, canopyDensity: 0.48,
+    trunk: ['minecraft:spruce_log'], branches: ['minecraft:spruce_log','minecraft:spruce_fence','minecraft:spruce_stairs'],
+    twigs: ['minecraft:spruce_fence','minecraft:spruce_trapdoor'], leaves: ['minecraft:spruce_leaves']
+  },
+  'cedar': {
+    family: 'conifer', crownShape: 'tiered-wide', trunkRatio: 0.78, crownWidthRatio: 0.58,
+    branchStart: 0.30, branchTiers: 7, branchCount: [5, 8], branchDroop: 0.10, canopyDensity: 0.56,
+    trunk: ['minecraft:spruce_log'], branches: ['minecraft:spruce_log','minecraft:spruce_fence','minecraft:spruce_slab'],
+    twigs: ['minecraft:spruce_fence','minecraft:spruce_trapdoor'], leaves: ['minecraft:spruce_leaves','minecraft:dark_oak_leaves']
+  }
+});
+
+export function selectTreePreset({ species, genus, leafType, crownDiameterM, heightM, tags = {} } = {}) {
+  const text = `${species || ''} ${genus || ''} ${tags.species || ''} ${tags.genus || ''}`.toLowerCase();
+  if (/willow|salix/.test(text)) return preset('willow');
+  if (/birch|betula/.test(text)) return preset('birch');
+  if (/beech|fagus/.test(text)) return preset('beech');
+  if (/cedar|cedrus/.test(text)) return preset('cedar');
+  if (/pine|pinus/.test(text)) return preset('pine');
+  if (/spruce|picea|fir|abies|conifer|cypress|larch/.test(text) || String(leafType || '').toLowerCase().includes('needle')) return preset('spruce');
+  if (/oak|quercus/.test(text)) {
+    const ancient = Number(heightM) >= 18 || Number(crownDiameterM) >= 14 || /veteran|ancient/.test(text);
+    return preset(ancient ? 'ancient-oak' : 'broadleaf-oak');
+  }
+  return preset('broadleaf-oak');
+}
+
+export function preset(name) { return { id: name, ...PRESETS[name] }; }
+export function treePresetNames() { return Object.keys(PRESETS); }
+
+export function resolveTreeDimensions(presetValue, { heightM, crownDiameterM } = {}) {
+  const height = clamp(Math.round(Number(heightM) || 10), 3, 45);
+  const measuredCrown = Number(crownDiameterM);
+  const crownDiameter = clamp(Math.round(Number.isFinite(measuredCrown) && measuredCrown > 0
+    ? measuredCrown : height * presetValue.crownWidthRatio), 3, 22);
+  return { height, crownDiameter, crownRadius: crownDiameter / 2 };
+}
+
+export function crownRadiusAt(presetValue, t, radius) {
+  const u = clamp(t, 0, 1);
+  switch (presetValue.crownShape) {
+    case 'conical': return radius * (0.22 + (1 - u) * 0.78);
+    case 'open-conifer': return radius * (0.28 + Math.sin(Math.PI * u) * 0.72);
+    case 'tiered-wide': return radius * (0.40 + Math.sin(Math.PI * u) * 0.60);
+    case 'oval': return radius * Math.max(0.34, Math.sin(Math.PI * (0.08 + u * 0.84)));
+    case 'light-oval': return radius * Math.max(0.28, Math.sin(Math.PI * (0.10 + u * 0.82)));
+    case 'weeping': return radius * (0.48 + Math.sin(Math.PI * u) * 0.52);
+    case 'wide-irregular': return radius * (0.56 + Math.sin(Math.PI * u) * 0.44);
+    default: return radius * (0.42 + Math.sin(Math.PI * u) * 0.58);
+  }
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
