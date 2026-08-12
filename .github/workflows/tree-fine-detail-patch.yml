@@ -35,3 +35,4 @@ jobs:
           git add src/lib/tree-generator.mjs
           git commit -m "Add fine twig and leaf-edge detailing"
           git push origin HEAD:agent/realistic-tree-presets-v1
+# trigger: fine-detail-v3
