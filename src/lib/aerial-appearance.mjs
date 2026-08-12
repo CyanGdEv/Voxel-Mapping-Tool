@@ -152,9 +152,15 @@ export function terrainStyleForAerialClass(classification) {
 }
 
 /** Chooses a Bedrock leaf palette from observed canopy colour and source tags. */
-export function vegetationPaletteForRgb(rgb, leafType = null, leafCycle = null) {
+export function vegetationPaletteForRgb(rgb, leafType = null, leafCycle = null, species = null) {
   const type = String(leafType || "").toLowerCase();
   const cycle = String(leafCycle || "").toLowerCase();
+  const taxon = String(species || "").toLowerCase();
+  if (/birch|betula/.test(taxon)) return ["minecraft:birch_leaves", "minecraft:oak_leaves"];
+  if (/spruce|pine|fir|larch|cedar|cypress|hemlock|douglas|conifer/.test(taxon)) {
+    return ["minecraft:spruce_leaves", "minecraft:dark_oak_leaves"];
+  }
+  if (/oak|quercus/.test(taxon)) return ["minecraft:oak_leaves", "minecraft:dark_oak_leaves"];
   if (type.includes("needle") || type.includes("conifer")) {
     return ["minecraft:spruce_leaves", "minecraft:dark_oak_leaves"];
   }

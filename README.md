@@ -89,7 +89,7 @@ The typed reconstruction graph sits between GIS normalization and voxel compilat
 
 ## Planning drawings
 
-Raw PDFs/images are discovered from official application records, hashed, size-bounded and retained as processing-only evidence. The automatic extractor renders each bounded page, performs OCR and line/contour recovery, reads the stated drawing scale, associates geometry with planning labels, and aligns the drawing's red-line/site boundary to the official application location. OSM can supply registration control only; its geometry never replaces the extracted plan.
+Raw PDFs, images and native planning attachments are discovered from official application records, hashed, size-bounded and retained as processing-only evidence. ASCII DXF is decoded directly in model space (including BNG or declared model units), avoiding raster precision loss. DWG/IFC/ZIP is inventoried and cached for a controlled converter rather than misread as a PDF. The raster extractor renders each bounded PDF/image page, performs OCR and line/contour recovery, reads the stated drawing scale, associates geometry with planning labels, and aligns the drawing's red-line/site boundary to the official application location. OSM can supply registration control only; its geometry never replaces the extracted plan.
 
 Automatic geometry is promoted only when scale, location, semantic association, application decision and current-state/as-built or independent DSM corroboration gates pass. Approved-but-unverified proposals remain in `planning-sources.json` and cannot enter the world. A manual [planning manifest](docs/PLANNING_MANIFEST.md) remains available as an expert override for inaccessible archives or higher-quality CAD/survey derivatives; use `--no-auto-planning` with those inputs.
 
@@ -100,6 +100,8 @@ node src/cli.mjs extract-plan --input drawing.pdf --page 1 --out out/drawing-rev
 This writes an SVG candidate layer, raw OCR lines, drawing-scale candidates and semantic anchors for diagnosis.
 
 Older official applications are included by the bounded spatial search and per-park seed list. An approval alone still does not prove construction or continued existence.
+
+Repository administrators may configure `OS_NGD_API_KEY`, `TPMAP_TREE_SPECIES_MAP_URL`, and `TPMAP_TREE_SPECIES_LEGEND_JSON` once. The five park profiles already enable these adapters, so workflow users still choose only the park. If a licensed/keyed source is absent, the build records that fact and continues with the open-data layers; it never substitutes OSM geometry.
 
 See:
 

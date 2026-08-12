@@ -24,6 +24,8 @@
     "wikidataPlaces": true,
     "wikimediaCommons": true,
     "openAerialMap": true,
+    "osNgd": true,
+    "treeSpecies": true,
     "terrainDetailMode": "evidence",
     "pathGeometryMode": "qa",
     "pathDiscoveryMode": "qa",

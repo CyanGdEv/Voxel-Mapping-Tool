@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyAerialPatch, terrainStyleForAerialClass } from "../src/lib/aerial-appearance.mjs";
+import { classifyAerialPatch, terrainStyleForAerialClass, vegetationPaletteForRgb } from "../src/lib/aerial-appearance.mjs";
 import { deriveSurfaceStyle, blockForSurfaceStyle, enrichUniversalFidelity } from "../src/lib/fidelity.mjs";
 import { normalizeMap } from "../src/lib/osm.mjs";
 import { compileMap } from "../src/lib/raster.mjs";
@@ -57,6 +57,12 @@ test("aerial appearance separates canopy, soil, and textured neutral ground", ()
     [145, 141, 142], [98, 101, 99], [160, 157, 153], [118, 116, 119]
   ]);
   assert.equal(gravel.class, "rock-gravel");
+});
+
+test("classified tree species select an appropriate Minecraft canopy family", () => {
+  assert.equal(vegetationPaletteForRgb(null, null, null, "Norway spruce")[0], "minecraft:spruce_leaves");
+  assert.equal(vegetationPaletteForRgb(null, null, null, "Silver birch")[0], "minecraft:birch_leaves");
+  assert.equal(vegetationPaletteForRgb(null, null, null, "English oak")[0], "minecraft:oak_leaves");
 });
 
 test("woodland, scrub, and hedge source features compile as dense vegetation evidence", async () => {

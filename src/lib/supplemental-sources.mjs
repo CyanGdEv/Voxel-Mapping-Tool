@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { bboxCenter } from "./geo.mjs";
 import { UserError, invariant } from "./errors.mjs";
 import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256 } from "./io.mjs";
+import { loadTreeSpeciesRaster } from "./tree-species-raster.mjs";
 
 const OGL_3 = "Open Government Licence v3.0";
 const PLANNING_DATA_URL = "https://www.planning.data.gov.uk/entity.geojson";
@@ -14,19 +15,24 @@ const MICROSOFT_BUILDINGS_INDEX = "https://bfppub.blob.core.windows.net/$web/202
 const WIKIDATA_SPARQL = "https://query.wikidata.org/sparql";
 const COMMONS_API = "https://commons.wikimedia.org/w/api.php";
 const OPEN_AERIAL_MAP_API = "https://api.openaerialmap.org/meta";
+const OS_NGD_API = "https://api.os.uk/features/ngd/ofa/v1";
 
 const DEFAULT_PLANNING_DATASETS = [
   "tree",
   "tree-preservation-zone",
   "ancient-woodland",
-  "listed-building"
+  "listed-building",
+  "scheduled-monument",
+  "conservation-area",
+  "park-and-garden"
 ];
 
 export async function acquireSupplementalSources(options, context) {
+  const wantsTreeSpecies = Boolean(options.treeSpecies || options.treeSpeciesMap || options.treeSpeciesMapUrl);
   const requested = Boolean(
     options.englandOpenData || options.treesOutsideWoodland || options.planningData ||
     options.microsoftBuildings || options.wikidataPlaces || options.wikimediaCommons ||
-    options.openAerialMap || options.osOpenMapLocal?.length || options.sourceConfig?.length
+    options.openAerialMap || options.osNgd || wantsTreeSpecies || options.osOpenMapLocal?.length || options.sourceConfig?.length
   );
   const result = {
     schemaVersion: 1,
@@ -67,8 +73,16 @@ export async function acquireSupplementalSources(options, context) {
   if (options.englandOpenData || options.planningData) {
     await run("planning-data", () => acquirePlanningData(runtime, options));
   }
+  let treeSpeciesSampler = null;
+  if (wantsTreeSpecies) {
+    await run("tree-species-map", async () => {
+      const acquired = await loadTreeSpeciesRaster(options, runtime);
+      treeSpeciesSampler = acquired.sampler;
+      return acquired;
+    });
+  }
   if (options.englandOpenData || options.treesOutsideWoodland) {
-    await run("trees-outside-woodland", () => acquireTreesOutsideWoodland(runtime, options));
+    await run("trees-outside-woodland", () => acquireTreesOutsideWoodland(runtime, options, treeSpeciesSampler));
   }
   if (options.microsoftBuildings) {
     await run("microsoft-buildings", () => acquireMicrosoftBuildings(runtime, options));
@@ -81,6 +95,9 @@ export async function acquireSupplementalSources(options, context) {
   }
   if (options.openAerialMap) {
     await run("open-aerial-map", () => discoverOpenAerialMap(runtime, options));
+  }
+  if (options.osNgd) {
+    await run("os-ngd", () => acquireOsNgd(runtime, options));
   }
   for (const filename of options.osOpenMapLocal || []) {
     await run(`os-openmap-local:${path.basename(filename)}`, () => acquireOsOpenMapLocal(runtime, filename));
@@ -109,7 +126,7 @@ function addCollection(result, entry) {
   result.providers[provider] = (result.providers[provider] || 0) + entry.collection.features.length;
 }
 
-async function acquireTreesOutsideWoodland(runtime, options) {
+async function acquireTreesOutsideWoodland(runtime, options, treeSpeciesSampler = null) {
   const baseUrl = options.treesOutsideWoodlandUrl || TOW_OGC_URL;
   const collectionsUrl = new URL(`${stripSlash(baseUrl)}/collections`);
   collectionsUrl.searchParams.set("f", "json");
@@ -146,7 +163,7 @@ async function acquireTreesOutsideWoodland(runtime, options) {
       const subtype = inferTowSubtype(feature.properties);
       const sourceId = firstString(feature.properties, ["tow_id", "TOW_ID"]);
       const tileId = firstString(feature.properties, ["km1_tile", "KM1_TILE"]);
-      return standardizeFeature(feature, {
+      const standardized = standardizeFeature(feature, {
         idPrefix: `tow:${collection.id}`,
         index,
         // TOW_ID is not globally unique: the live service can return multiple
@@ -174,6 +191,17 @@ async function acquireTreesOutsideWoodland(runtime, options) {
           lidar_survey_year: firstNumber(feature.properties, ["lidar_survey_year", "LiDAR_Survey_Year"])
         }
       });
+      const point = representativePoint(feature.geometry);
+      const species = point && treeSpeciesSampler ? treeSpeciesSampler(point[0], point[1]) : null;
+      if (species) {
+        standardized.properties.tree_species_class = species.classCode;
+        standardized.properties.tree_species_confidence = species.confidence;
+        standardized.properties.tree_species_confidence_basis = species.confidenceBasis;
+        standardized.properties.tree_species_source = "Forestry Commission Tree Species Map England";
+        if (species.species && !standardized.properties.species) standardized.properties.species = species.species;
+        if (species.leafType && !standardized.properties.leaf_type) standardized.properties.leaf_type = species.leafType;
+      }
+      return standardized;
     });
     totalFeatures += features.length;
     output.push(collectionEntry({
@@ -268,7 +296,8 @@ function standardizePlanningFeature(feature, index, endpoint) {
     "ancient-woodland": ["vegetation", "ancient-woodland"],
     "listed-building": ["building", "listed-building"],
     "scheduled-monument": ["structure", "scheduled-monument"],
-    "conservation-area": ["detail", "conservation-area"]
+    "conservation-area": ["detail", "conservation-area"],
+    "park-and-garden": ["detail", "registered-park-and-garden"]
   };
   let [kind, subtype] = mapping[dataset] || ["detail", dataset];
   if (dataset === "listed-building" && !["Polygon", "MultiPolygon"].includes(feature.geometry.type)) {
@@ -606,6 +635,110 @@ async function acquireOsOpenMapLocal(runtime, filename) {
   };
 }
 
+async function acquireOsNgd(runtime, options) {
+  const apiKey = options.osNgdApiKey || process.env.OS_NGD_API_KEY || process.env.TPMAP_OS_NGD_API_KEY;
+  const baseUrl = stripSlash(options.osNgdUrl || OS_NGD_API);
+  if (!apiKey) return {
+    collections: [],
+    evidence: {
+      provider: "Ordnance Survey",
+      dataset: "OS National Geographic Database",
+      endpoint: baseUrl,
+      configured: false,
+      reason: "OS_NGD_API_KEY is not configured"
+    },
+    warnings: ["OS NGD is enabled but no OS_NGD_API_KEY is configured; continuing with open sources."]
+  };
+
+  const listingUrl = new URL(`${baseUrl}/collections`);
+  listingUrl.searchParams.set("f", "json");
+  listingUrl.searchParams.set("key", apiKey);
+  const { data: listing, cacheHit: listingCacheHit } = await cachedJson({
+    cacheDir: path.join(runtime.cacheDir, "supplemental", "os-ngd-collections"),
+    key: listingUrl.toString(),
+    noCache: runtime.noCache,
+    fetcher: () => fetchJson(listingUrl, requestHeaders(runtime), { retries: 2 })
+  });
+  const explicit = splitCsv(options.osNgdCollections);
+  const useful = /building|structure|transport|path|land|water|site|named|street|road|rail|vegetation|hedge|field boundar/i;
+  const selected = (listing.collections || []).filter((collection) => {
+    if (explicit?.length) return explicit.includes(collection.id);
+    return useful.test(`${collection.id || ""} ${collection.title || ""} ${collection.description || ""}`);
+  }).slice(0, Math.max(1, Math.min(30, Number(options.osNgdMaxCollections ?? 20))));
+
+  const collections = [];
+  let remaining = runtime.maxFeatures;
+  for (const collection of selected) {
+    if (remaining <= 0) break;
+    const itemsUrl = `${baseUrl}/collections/${encodeURIComponent(collection.id)}/items`;
+    const acquired = await fetchOgcFeaturePages({ ...runtime, maxFeatures: remaining }, {
+      url: itemsUrl,
+      bbox: runtime.bbox,
+      limit: runtime.pageSize,
+      query: { key: apiKey }
+    });
+    const features = acquired.features.map((raw, index) => {
+      const classification = classifyOsNgd(raw.properties || {}, raw.geometry, collection);
+      const properties = raw.properties || {};
+      return standardizeFeature(raw, {
+        idPrefix: `os-ngd:${collection.id}`,
+        index,
+        provider: "Ordnance Survey",
+        sourceUrl: "https://docs.os.uk/osngd",
+        license: options.osNgdLicense || "OS Data Hub terms (account-specific)",
+        dataset: `OS NGD/${collection.title || collection.id}`,
+        adapter: "os-ngd-ogc-api-features",
+        kind: classification.kind,
+        subtype: classification.subtype,
+        checkedAt: new Date().toISOString(),
+        mergePolicy: ["water", "vegetation"].includes(classification.kind) ? "independent-detail" : "gap-fill",
+        heightM: firstNumber(properties, [
+          "relativeHeightMaximum", "relative_height_maximum", "relativeHeight", "height", "height_m",
+          "RelativeHeightMaximum", "Height"
+        ]),
+        accuracyM: firstNumber(properties, ["accuracyOfPosition", "accuracy_m", "planimetricAccuracy"]),
+        extra: {
+          os_ngd_collection: collection.id,
+          roof_shape: firstString(properties, ["roofShape", "roof_shape", "RoofShape"]),
+          roof_material: firstString(properties, ["roofMaterial", "roof_material", "RoofMaterial"]),
+          storeys: firstNumber(properties, ["numberOfStoreys", "storeys", "NumberOfStoreys"]),
+          absolute_height_max_m: firstNumber(properties, ["absoluteHeightMaximum", "absolute_height_maximum"]),
+          average_height_m: firstNumber(properties, ["averageHeight", "average_height"]),
+          average_width_m: firstNumber(properties, ["averageWidth", "average_width"])
+        }
+      });
+    });
+    remaining -= features.length;
+    collections.push(collectionEntry({
+      id: `os-ngd:${collection.id}`,
+      adapter: "os-ngd-ogc-api-features",
+      provider: "Ordnance Survey",
+      endpoint: itemsUrl,
+      cacheHit: listingCacheHit && acquired.cacheHits === acquired.pages,
+      collection: featureCollection(features, {
+        name: "Ordnance Survey",
+        url: "https://docs.os.uk/osngd",
+        license: options.osNgdLicense || "OS Data Hub terms (account-specific)",
+        dataset: `OS NGD/${collection.title || collection.id}`,
+        checked_at: new Date().toISOString()
+      }),
+      request: { ...acquired.request, collection: collection.id }
+    }));
+  }
+  return {
+    collections,
+    evidence: {
+      provider: "Ordnance Survey",
+      dataset: "OS National Geographic Database",
+      endpoint: baseUrl,
+      configured: true,
+      discoveredCollections: listing.collections?.length || 0,
+      selectedCollections: selected.map((collection) => ({ id: collection.id, title: collection.title || null }))
+    },
+    warnings: selected.length ? [] : ["No relevant OS NGD collections were found; use --os-ngd-collections to select explicit collection IDs."]
+  };
+}
+
 async function acquireConfiguredSource(runtime, config, configFilename, index) {
   invariant(config && typeof config === "object", `${configFilename} source ${index} must be an object`);
   const type = String(config.type || "").toLowerCase();
@@ -740,6 +873,7 @@ async function fetchOgcFeaturePages(runtime, { url, bbox, limit, query = {} }) {
   let pages = 0;
   let cacheHits = 0;
   while (nextUrl && features.length < runtime.maxFeatures) {
+    for (const [key, value] of Object.entries(query)) if (!nextUrl.searchParams.has(key)) nextUrl.searchParams.set(key, String(value));
     const requestUrl = nextUrl.toString();
     const { data, cacheHit } = await cachedJson({
       cacheDir: path.join(runtime.cacheDir, "supplemental", "ogc-features"),
@@ -850,6 +984,19 @@ function classifyOsOpenMapLocal(properties, geometry) {
   return { kind: geometry.type.includes("Polygon") ? "surface" : "detail", subtype: "os-openmap-local" };
 }
 
+function classifyOsNgd(properties, geometry, collection = {}) {
+  const text = `${collection.id || ""} ${collection.title || ""} ${Object.values(properties).filter((value) => typeof value === "string").join(" ")}`.toLowerCase();
+  const polygon = geometry?.type?.includes("Polygon");
+  if (/building/.test(text) && polygon) return { kind: "building", subtype: "os-ngd-building" };
+  if (/footpath|path|pedestrian|footbridge|steps|transport.*path/.test(text)) return { kind: "path", subtype: /bridge/.test(text) ? "os-ngd-footbridge" : "os-ngd-path" };
+  if (/hedge|field boundar|fence|wall|barrier|railing/.test(text)) return { kind: /hedge/.test(text) ? "vegetation" : "barrier", subtype: /hedge/.test(text) ? "os-ngd-hedge" : "os-ngd-boundary-structure" };
+  if (/water|lake|pond|river|stream|watercourse/.test(text)) return { kind: "water", subtype: "os-ngd-water" };
+  if (/tree|woodland|vegetation|scrub/.test(text)) return { kind: "vegetation", subtype: "os-ngd-vegetation" };
+  if (/bridge|structure|statue|monument|mast|tower|street light|streetlight/.test(text)) return { kind: "structure", subtype: "os-ngd-structure" };
+  if (/road|street|carriageway/.test(text)) return { kind: "road", subtype: "os-ngd-road" };
+  return { kind: polygon ? "surface" : "detail", subtype: "os-ngd-feature" };
+}
+
 function inferTowSubtype(properties = {}) {
   const value = firstString(properties, [
     "woodland_type", "Woodland_Type", "WoodlandType", "WOODLAND_TYPE",
@@ -876,6 +1023,20 @@ function inferGenericKind(properties, geometry) {
 
 function inferGenericSubtype(properties) {
   return firstString(properties, ["subtype", "type", "class", "category", "descriptiveTerm"]) || "public-observation";
+}
+
+function representativePoint(geometry) {
+  const points = [];
+  const visit = (value) => {
+    if (Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every(Number.isFinite)) points.push(value);
+    else if (Array.isArray(value)) for (const item of value) visit(item);
+  };
+  visit(geometry?.coordinates);
+  if (!points.length) return null;
+  return [
+    points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    points.reduce((sum, point) => sum + point[1], 0) / points.length
+  ];
 }
 
 function collectionIntersectsBbox(collection, bbox) {
@@ -1113,6 +1274,7 @@ export const __test = {
   geometryIntersectsBbox,
   standardizePlanningFeature,
   classifyOsOpenMapLocal,
+  classifyOsNgd,
   selectMicrosoftRows,
   inferTowSubtype,
   towFeatureId,

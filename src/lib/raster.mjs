@@ -1247,7 +1247,7 @@ function compileVegetationFeature(context) {
     if (modelClass === "shrubland") {
       const shrub = compileShrubModel({
         add, x, z, groundY: elevationY[index],
-        palette: vegetationPaletteForRgb(candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle),
+        palette: vegetationPaletteForRgb(candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle, evidence.species),
         seed: seed ^ hashText(feature.id)
       });
       stats.shrubModels += 1;
@@ -1270,11 +1270,11 @@ function compileVegetationFeature(context) {
     else stats.heightInferred += 1;
 
     const leafPalette = vegetationPaletteForRgb(
-      candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle
+      candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle, evidence.species
     );
     const model = compileTreeModel({
       add, x, z, groundY: elevationY[index], heightM: resolvedHeight.heightM,
-      crownDiameterM: evidence.crownDiameterM, leafType: evidence.leafType,
+      crownDiameterM: evidence.crownDiameterM, leafType: evidence.leafType, species: evidence.species,
       leafPalette, seed: seed ^ hashText(`${feature.id}:${x}:${z}`)
     });
     stats.models += 1;
@@ -1386,7 +1386,7 @@ function compileHedgeFeature(context) {
   const hedgeHeight = clamp(Math.round(numericWidth(feature.tags?.height, 2)), 1, 5);
   const palette = vegetationPaletteForRgb(
     aerialSampler?.(...featureCentroid(feature.localGeometry))?.rgb,
-    evidence.leafType, evidence.leafCycle
+    evidence.leafType, evidence.leafCycle, evidence.species
   );
   let blocks = 0;
   for (const line of lineStrings(feature.localGeometry)) {
@@ -1417,13 +1417,15 @@ function compileShrubModel({ add, x, z, groundY, palette, seed }) {
   return { leafBlocks };
 }
 
-function compileTreeModel({ add, x, z, groundY, heightM, crownDiameterM, leafType, leafPalette, seed = 0 }) {
+function compileTreeModel({ add, x, z, groundY, heightM, crownDiameterM, leafType, species, leafPalette, seed = 0 }) {
   const treeHeight = Math.max(2, Math.min(40, Math.round(heightM)));
   const trunkHeight = Math.max(2, Math.min(treeHeight - 1, Math.round(treeHeight * 0.68)));
   const crownRadius = Math.max(1, Math.min(6, Math.round(
     Number.isFinite(crownDiameterM) ? crownDiameterM / 2 : treeHeight * 0.22
   )));
-  const needled = String(leafType || "").toLowerCase().includes("needle");
+  const taxon = String(species || "").toLowerCase();
+  const needled = String(leafType || "").toLowerCase().includes("needle") ||
+    /spruce|pine|fir|larch|cedar|cypress|hemlock|douglas|conifer/.test(taxon);
   const log = needled ? "minecraft:spruce_log" : "minecraft:oak_log";
   const palette = leafPalette?.length ? leafPalette : needled
     ? ["minecraft:spruce_leaves", "minecraft:dark_oak_leaves"]

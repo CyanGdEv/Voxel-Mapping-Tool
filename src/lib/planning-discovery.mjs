@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
+import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "./planning-native-vector.mjs";
 import {
   autoGeoreferencePlanningPage,
   corroborateAutomaticPlanningCollection
@@ -492,7 +493,7 @@ async function crawlApplicationDocuments(applicationInput, profile, options, run
 
 async function processPlanningDocument(document, application, profile, options, runtime, limits, deferEligibility = false) {
   const failures = [], warnings = [];
-  let sourceFile = null, sourceHash = null, sizeBytes = null, sourceMime = null;
+  let sourceFile = null, sourceHash = null, sizeBytes = null, sourceMime = null, sourceBytes = null;
   const evidence = {
     id: document.id,
     applicationReference: application.reference || "unknown",
@@ -520,11 +521,11 @@ async function processPlanningDocument(document, application, profile, options, 
         : fetchPortalBinary(document.url, runtime, "application/pdf,image/*,*/*")
     });
     sourceFile = cached.filename;
-    const bytes = await readFile(sourceFile);
-    sizeBytes = bytes.length;
+    sourceBytes = await readFile(sourceFile);
+    sizeBytes = sourceBytes.length;
     if (sizeBytes > Number(options.maxPlanningDocumentMb || 250) * 1024 * 1024) throw new Error("document exceeds max-planning-document-mb");
-    if (!supportedDocument(bytes)) throw new Error("official document response is not a supported PDF or image");
-    sourceMime = detectDocumentMime(bytes, sourceFile);
+    sourceMime = detectDocumentMime(sourceBytes, sourceFile);
+    if (!supportedDocument(sourceBytes, sourceMime)) throw new Error("official document response is not a supported planning document");
     sourceHash = await sha256File(sourceFile);
     evidence.acquired = true;
     evidence.sha256 = sourceHash;
@@ -536,30 +537,56 @@ async function processPlanningDocument(document, application, profile, options, 
     return { evidence, collection: null, candidateCollection: null, sourceFile, failures, warnings };
   }
 
-  const pageCount = await documentPageCount(sourceFile, sourceMime);
+  if (sourceMime !== "application/dxf") sourceBytes = null;
   const features = [];
-  for (let page = 1; page <= Math.min(pageCount, limits.pages); page += 1) {
+  if (sourceMime === "application/dxf") {
     try {
-      const extracted = await extractRasterPlanningPage({
-        filename: sourceFile,
-        page,
-        workDirectory: path.join(runtime.cacheDir, "planning-extraction", profile.id, sourceHash.slice(0, 16)),
-        document: { id: document.id, sha256: sourceHash, mime: sourceMime }
-      });
-      const georeferenced = autoGeoreferencePlanningPage({
-        svg: extracted.svg,
-        semantic: extracted.semantic,
+      const georeferenced = extractNativeDxfPlanning({
+        bytes: sourceBytes,
         application,
-        document: { ...document, dpi: 300 },
+        document,
         profile,
-        page,
         minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
       });
       evidence.extraction.push(compactExtraction(georeferenced));
       features.push(...georeferenced.collection.features);
     } catch (error) {
-      failures.push(failure("planning-page-extraction", `${document.url}#page=${page}`, error, application.reference));
+      failures.push(failure("planning-native-dxf-extraction", document.url, error, application.reference));
     }
+  } else if (isRasterPlanningDocument(sourceMime)) {
+    const pageCount = await documentPageCount(sourceFile, sourceMime);
+    for (let page = 1; page <= Math.min(pageCount, limits.pages); page += 1) {
+      try {
+        const extracted = await extractRasterPlanningPage({
+          filename: sourceFile,
+          page,
+          workDirectory: path.join(runtime.cacheDir, "planning-extraction", profile.id, sourceHash.slice(0, 16)),
+          document: { id: document.id, sha256: sourceHash, mime: sourceMime }
+        });
+        const georeferenced = autoGeoreferencePlanningPage({
+          svg: extracted.svg,
+          semantic: extracted.semantic,
+          application,
+          document: { ...document, dpi: 300 },
+          profile,
+          page,
+          minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
+        });
+        evidence.extraction.push(compactExtraction(georeferenced));
+        features.push(...georeferenced.collection.features);
+      } catch (error) {
+        failures.push(failure("planning-page-extraction", `${document.url}#page=${page}`, error, application.reference));
+      }
+    }
+  } else {
+    evidence.extraction.push({
+      status: "native-planning-format-inventoried",
+      page: null,
+      confidence: 0,
+      nativeFormat: sourceMime,
+      acceptedFeatures: 0
+    });
+    warnings.push(`${document.title || document.id}: ${sourceMime} was preserved in the evidence cache but needs an external converter before geometry can be promoted.`);
   }
 
   const collection = { type: "FeatureCollection", features };
@@ -763,14 +790,16 @@ function compactExtraction(value) {
     origin: value.origin,
     shapes: value.shapes,
     associatedShapes: value.associatedShapes,
+    nativeFormat: value.nativeFormat || null,
+    registration: value.registration || null,
     acceptedFeatures: value.collection?.features?.length || 0
   };
 }
 
-function supportedDocument(bytes) {
-  if (bytes.subarray(0, 5).toString("ascii") === "%PDF-") return true;
-  const hex = bytes.subarray(0, 12).toString("hex");
-  return /^(?:89504e47|ffd8ff|49492a00|4d4d002a)/i.test(hex);
+function supportedDocument(bytes, mime = detectDocumentMime(bytes, "")) {
+  return isRasterPlanningDocument(mime) || [
+    "application/dxf", "application/vnd.dwg", "application/ifc", "application/zip"
+  ].includes(mime);
 }
 
 function detectDocumentMime(bytes, filename) {
@@ -779,6 +808,10 @@ function detectDocumentMime(bytes, filename) {
   if (hex.startsWith("89504e47")) return "image/png";
   if (hex.startsWith("ffd8ff")) return "image/jpeg";
   if (hex.startsWith("49492a00") || hex.startsWith("4d4d002a")) return "image/tiff";
+  if (hex.startsWith("504b0304")) return "application/zip";
+  if (looksLikeAsciiDxf(bytes) || /\.dxf$/i.test(filename)) return "application/dxf";
+  if (/^AC10\d{2}/.test(bytes.subarray(0, 6).toString("ascii")) || /\.dwg$/i.test(filename)) return "application/vnd.dwg";
+  if (/ISO-10303-21/i.test(bytes.subarray(0, 256).toString("ascii")) || /\.ifc$/i.test(filename)) return "application/ifc";
   if (/\.png$/i.test(filename)) return "image/png";
   if (/\.jpe?g$/i.test(filename)) return "image/jpeg";
   if (/\.tiff?$/i.test(filename)) return "image/tiff";
@@ -788,7 +821,11 @@ function detectDocumentMime(bytes, filename) {
 function documentExtension(value) {
   let extension = "";
   try { extension = path.extname(new URL(value).pathname).toLowerCase(); } catch { extension = path.extname(String(value)).toLowerCase(); }
-  return /^\.(?:pdf|png|jpe?g|tiff?)$/.test(extension) ? extension : ".pdf";
+  return /^\.(?:pdf|png|jpe?g|tiff?|dxf|dwg|ifc|zip)$/.test(extension) ? extension : ".pdf";
+}
+
+function isRasterPlanningDocument(mime) {
+  return mime === "application/pdf" || /^image\/(?:png|jpeg|tiff)$/.test(mime);
 }
 
 function requestHeaders(userAgent, accept) {

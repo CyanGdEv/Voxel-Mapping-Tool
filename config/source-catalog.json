@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-11",
+  "updatedAt": "2026-08-12",
   "authorityPolicy": "Planning derivatives define world geometry; OSM is alignment-only.",
   "sources": [
     {
@@ -24,7 +24,7 @@
       "id": "planning-data-gov-uk",
       "name": "Planning Data",
       "url": "https://www.planning.data.gov.uk/docs",
-      "role": ["designations", "trees", "listed-buildings", "planning-entity-discovery"],
+      "role": ["designations", "trees", "listed-buildings", "scheduled-monuments", "conservation-areas", "registered-parks-and-gardens", "planning-entity-discovery"],
       "authority": "supplemental-evidence",
       "integration": "bounded-api-adapter",
       "license": "Open Government Licence v3.0 where dataset metadata states it"
@@ -70,12 +70,30 @@
       "integration": "bounded-api-adapter"
     },
     {
+      "id": "tree-species-map-england",
+      "name": "Tree Species Map England",
+      "url": "https://environment.data.gov.uk/dataset/0c7a4e86-5fb2-4e13-867b-3d24c332f257",
+      "role": ["tree-species", "leaf-type", "classification-confidence"],
+      "authority": "vegetation-attribute-evidence",
+      "integration": "bounded-geotiff-cog-window-adapter",
+      "license": "Open Government Licence v3.0"
+    },
+    {
       "id": "os-open-data",
       "name": "Ordnance Survey OpenData",
       "url": "https://www.ordnancesurvey.co.uk/products/open-data",
       "role": ["official-open-mapping", "water", "buildings", "transport"],
       "authority": "supplemental-independent-observation",
       "integration": "local-geojson-or-source-config"
+    },
+    {
+      "id": "os-ngd",
+      "name": "OS National Geographic Database",
+      "url": "https://docs.os.uk/osngd",
+      "role": ["building-roof-attributes", "storeys", "structures", "paths", "water", "field-boundaries"],
+      "authority": "licensed-supplemental-independent-observation",
+      "integration": "optional-bounded-ogc-api-adapter",
+      "reuse": "OS Data Hub account and product terms apply"
     },
     {
       "id": "openstreetmap",
@@ -149,7 +167,7 @@
       "url": "https://historicengland.org.uk/listing/the-list/data-downloads/",
       "role": ["listed-buildings", "heritage-context"],
       "authority": "supplemental-evidence",
-      "integration": "catalogued-generic-input"
+      "integration": "planning-data-designation-adapter-and-generic-input"
     },
     {
       "id": "bgs-opengeoscience",

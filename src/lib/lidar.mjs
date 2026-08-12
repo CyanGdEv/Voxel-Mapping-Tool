@@ -96,6 +96,14 @@ export async function acquireLidarElevation(options, provider) {
     dtm: publicRasterMetadata(dtm, dtmSource, dtmHash),
     dsm: dsm ? publicRasterMetadata(dsm, dsmSource, dsmHash) : null,
     survey,
+    resolutionSelection: {
+      used: isLive ? "EA 1 m composite WCS" : "supplied GeoTIFF",
+      usedResolutionM: Math.max(dtm.resolutionM, dsm?.resolutionM || 0),
+      archivePolicy: "finest-resolution-then-latest-survey",
+      finestArchiveResolutionM: survey?.finestResolutionM ?? null,
+      higherResolutionArchiveAvailable: Number.isFinite(survey?.finestResolutionM) && survey.finestResolutionM < 1,
+      bestArchiveCandidates: survey?.bestAvailableTiles || []
+    },
     transformation: {
       name: "OSTN15",
       grid: path.basename(transform.gridPath),
@@ -297,14 +305,29 @@ async function acquireSurveyMetadata({ endpoint, bounds, cacheDir, userAgent, no
     survey: properties.surveys || null
   }));
   const dates = tiles.flatMap((tile) => [Date.parse(tile.flownFrom), Date.parse(tile.flownTo)]).filter(Number.isFinite);
+  const ranked = selectBestSurveyTiles(tiles);
+  const resolutions = tiles.map((tile) => tile.resolutionM).filter((value) => Number.isFinite(value) && value > 0);
   return {
     provider: "Environment Agency National LIDAR Programme index",
     cacheHit,
     tileCount: tiles.length,
     newestSurveyDate: dates.length ? new Date(Math.max(...dates)).toISOString() : null,
     oldestSurveyDate: dates.length ? new Date(Math.min(...dates)).toISOString() : null,
+    finestResolutionM: resolutions.length ? Math.min(...resolutions) : null,
+    bestAvailableTiles: ranked.slice(0, 12),
     tiles
   };
+}
+
+export function selectBestSurveyTiles(tiles) {
+  return (tiles || []).filter((tile) => tile && Number.isFinite(tile.resolutionM) && tile.resolutionM > 0)
+    .sort((a, b) => a.resolutionM - b.resolutionM ||
+      surveyTimestamp(b) - surveyTimestamp(a) ||
+      String(a.tile || a.surveyId || "").localeCompare(String(b.tile || b.surveyId || "")));
+}
+
+function surveyTimestamp(tile) {
+  return Math.max(Date.parse(tile.flownTo || 0) || 0, Date.parse(tile.flownFrom || 0) || 0);
 }
 
 function publicRasterMetadata(raster, source, fileHash) {

@@ -14,6 +14,8 @@ const VALUE_FLAGS = new Set([
   "trees-outside-woodland-collection", "microsoft-buildings-index-url",
   "microsoft-buildings-min-confidence", "wikidata-url", "wikidata-limit",
   "wikimedia-commons-url", "wikimedia-commons-limit", "open-aerial-map-url",
+  "os-ngd-api-key", "os-ngd-url", "os-ngd-collections", "os-ngd-license", "os-ngd-max-collections",
+  "tree-species-map", "tree-species-map-url", "tree-species-legend", "tree-species-min-confidence",
   "max-supplemental-features", "supplemental-page-size",
   "max-supplemental-download-mb", "scale",
   "max-area-km2", "max-cells", "min-confidence", "accuracy-mode",
@@ -52,6 +54,8 @@ const BOOLEAN_FLAGS = new Set([
   "no-dsm", "no-ride-info-signs", "quiet", "england-open-data",
   "trees-outside-woodland", "planning-data", "microsoft-buildings",
   "wikidata-places", "wikimedia-commons", "open-aerial-map",
+  "os-ngd",
+  "tree-species",
   "strict-supplemental-sources", "no-auto-planning"
 ]);
 
@@ -126,7 +130,7 @@ function normalize(options) {
     "wikimediaCommonsLimit", "maxSupplementalFeatures", "supplementalPageSize",
     "maxSupplementalDownloadMb", "maxPlanningDocumentMb", "maxPlanningApplications",
     "maxPlanningDocuments", "maxPlanningPagesPerDocument", "planningGeorefMinConfidence",
-    "planningShardIndex", "planningShardCount"
+    "planningShardIndex", "planningShardCount", "osNgdMaxCollections", "treeSpeciesMinConfidence"
   ];
   for (const key of numberKeys) {
     if (options[key] === undefined) continue;
@@ -176,6 +180,10 @@ function normalize(options) {
     (options.microsoftBuildingsMinConfidence < 0 || options.microsoftBuildingsMinConfidence > 1)) {
     throw new UserError("--microsoft-buildings-min-confidence must be between 0 and 1");
   }
+  if (options.treeSpeciesMinConfidence !== undefined &&
+    (options.treeSpeciesMinConfidence < 0 || options.treeSpeciesMinConfidence > 1)) {
+    throw new UserError("--tree-species-min-confidence must be between 0 and 1");
+  }
   for (const [key, minimum, maximum] of [
     ["maxPlanningApplications", 1, 2000],
     ["maxPlanningDocuments", 1, 500],
@@ -201,7 +209,7 @@ function normalize(options) {
   for (const [key, minimum, maximum] of [
     ["wikidataLimit", 1, 2000], ["wikimediaCommonsLimit", 1, 500],
     ["maxSupplementalFeatures", 1, 500000], ["supplementalPageSize", 1, 10000],
-    ["maxSupplementalDownloadMb", 1, 5000]
+    ["maxSupplementalDownloadMb", 1, 5000], ["osNgdMaxCollections", 1, 30]
   ]) {
     if (options[key] !== undefined && (!Number.isInteger(options[key]) || options[key] < minimum || options[key] > maximum)) {
       throw new UserError(`--${toKebab(key)} must be an integer between ${minimum} and ${maximum}`);
