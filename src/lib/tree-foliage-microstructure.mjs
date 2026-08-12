@@ -6,7 +6,8 @@ export function resolveTreeFoliageMicrostructure({ preset, species, genus, leafT
   const family = String(preset?.family || "broadleaf");
   const explicitDensity = finite(first(tags, ["tree:foliage_density", "foliage_density", "tpmap:foliage_density"]));
   const observedCoverage = finite(reconstruction?.coverageRatio ?? reconstruction?.coverage_ratio);
-  const baseDensity = clamp(explicitDensity ?? observedCoverage ?? Number(preset?.canopyDensity) || 0.76, 0.24, 0.98);
+  const presetDensity = finite(preset?.canopyDensity);
+  const baseDensity = clamp(explicitDensity ?? observedCoverage ?? presetDensity ?? 0.76, 0.24, 0.98);
   const structuralScale = clamp(Number(structuralForm?.canopyDensityScale) || 1, 0.35, 1.2);
   const density = clamp(baseDensity * structuralScale, 0.18, 0.98);
 
