@@ -8,7 +8,7 @@ import {
   corroborateAutomaticPlanningCollection,
   detectPlanningScales
 } from "../src/lib/planning-auto-georeference.mjs";
-import { discoverPlanningApplications } from "../src/lib/planning-discovery.mjs";
+import { discoverPlanningApplications, selectPlanningShard } from "../src/lib/planning-discovery.mjs";
 import {
   classifyPlanningDocument,
   classifyPlanningApplication,
@@ -50,8 +50,20 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.doesNotMatch(workflow, /--planning-manifest/);
   assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
   assert.doesNotMatch(workflow, /Configure the TPMAP_CONTACT repository secret/);
-  assert.equal((workflow.match(/github\.run_attempt/g) || []).length, 2,
-    "cache restore and save keys must be unique for every retry attempt");
+  assert.equal((workflow.match(/key: source-v3-[^\n]*github\.run_attempt/g) || []).length, 2,
+    "source cache restore and save keys must be unique for every retry attempt");
+  assert.match(workflow, /max-parallel: 20/);
+  assert.match(workflow, /planning-shard-count 20/);
+  assert.match(workflow, /merge-multiple: true/);
+  assert.match(workflow, /--planning-plan planning-plan\.json/);
+});
+
+test("parallel planning shards cover every document exactly once", () => {
+  const queue = Array.from({ length: 160 }, (_, index) => ({ index }));
+  const shards = Array.from({ length: 20 }, (_, index) => selectPlanningShard(queue, index, 20));
+  assert.ok(shards.every((shard) => shard.length === 8));
+  assert.deepEqual(shards.flat().map((item) => item.index).sort((a, b) => a - b),
+    queue.map((item) => item.index));
 });
 
 test("automatic planning controls are bounded and can be explicitly disabled for expert inputs", () => {

@@ -22,7 +22,90 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  planning-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PARK_ID: ${{ inputs.park }}
+      TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Restore discovery cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .tpmap-cache
+          key: planning-plan-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            source-v3-${{ runner.os }}-${{ inputs.park }}-
+      - run: npm ci
+      - name: Discover and freeze the bounded planning work queue
+        run: >-
+          node src/cli.mjs planning-plan
+          --park "$PARK_ID"
+          --contact "$TPMAP_CONTACT"
+          --out planning-plan.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: planning-plan.json
+          retention-days: 1
+
+  planning-extract:
+    needs: planning-plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    env:
+      PARK_ID: ${{ inputs.park }}
+      TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
+      TPMAP_SHARED_CACHE_DIR: .tpmap-cache
+      TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install planning extraction tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes poppler-utils python3-opencv tesseract-ocr
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Extract planning shard ${{ matrix.shard }} of 20
+        run: >-
+          node src/cli.mjs prepare-planning
+          --park "$PARK_ID"
+          --contact "$TPMAP_CONTACT"
+          --planning-plan planning-plan.json
+          --planning-shard-index ${{ matrix.shard }}
+          --planning-shard-count 20
+      - name: Upload content-addressed planning shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: planning-cache-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: |
+            .tpmap-cache/planning-documents/**
+            .tpmap-cache/prepared-generator/planning-raster-derivatives-v1/**
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
   generate:
+    needs: [planning-plan, planning-extract]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
@@ -55,6 +138,18 @@ jobs:
             source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
             source-v3-${{ runner.os }}-${{ inputs.park }}-
 
+      - name: Download frozen planning work queue
+        uses: actions/download-artifact@v8
+        with:
+          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Merge all planning extraction shards
+        uses: actions/download-artifact@v8
+        with:
+          pattern: planning-cache-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: .tpmap-cache
+          merge-multiple: true
+
       - name: Install geospatial and planning-drawing tools
         run: |
           sudo apt-get update
@@ -86,6 +181,7 @@ jobs:
             --buildings shells
             --strict
             --no-addon
+            --planning-plan planning-plan.json
             --out "$OUTPUT_DIR"
           )
           node src/cli.mjs "${args[@]}"
