@@ -1,0 +1,41 @@
+name: Mcworld worker patch
+
+on:
+  push:
+    branches:
+      - agent/maximize-generation-cpu
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/maximize-generation-cpu
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply deterministic chunk workers
+        run: node scripts/patch-mcworld-workers.mjs
+      - name: Run focused parallel world tests
+        env:
+          TPMAP_CPU_WORKERS: 4
+        run: node --test test/mcworld-parallel.test.mjs test/core.test.mjs
+      - name: Commit production integration
+        run: |
+          if git diff --quiet -- src/lib/mcworld.mjs; then
+            echo "Already integrated"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/mcworld.mjs
+          git commit -m "Parallelize Bedrock chunk serialization"
+          git push origin HEAD:agent/maximize-generation-cpu
