@@ -43,14 +43,19 @@ test("live vegetation paths are wired to high-fidelity trees", async () => {
   assert.ok(raster.includes('import { compileHighFidelityTreeModel } from "./tree-generator.mjs";'));
   assert.ok((raster.match(/compileHighFidelityTreeModel\(\{/g) || []).length >= 2);
 });
-test("Tree Reconstruction V2 is wired from LiDAR evidence through the live compiler", async () => {
-  const [fidelity, raster, generator] = await Promise.all([
+test("Tree Reconstruction V3 is wired from LiDAR evidence through mapped-tree watershed into the live compiler", async () => {
+  const [fidelity, raster, generator, reconstruction] = await Promise.all([
     readFile(new URL("../src/lib/fidelity.mjs", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/raster.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../src/lib/tree-generator.mjs", import.meta.url), "utf8")
+    readFile(new URL("../src/lib/tree-generator.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/tree-reconstruction.mjs", import.meta.url), "utf8")
   ]);
   assert.ok(fidelity.includes('import { reconstructTreeCrownFromSamples } from "./tree-reconstruction.mjs";'));
-  assert.ok(fidelity.includes("deriveTreeCrownReconstruction({ point, crownDiameter, heightM, elevation: sources.elevation, options })"));
+  assert.ok(fidelity.includes("const mappedTreeSeeds = treeFeatures"));
+  assert.ok(fidelity.includes("mappedTreeSeeds, featureId: feature.id"));
+  assert.ok(fidelity.includes("competitorSeeds"));
+  assert.ok(reconstruction.includes("dsm-dtm-seeded-watershed"));
+  assert.ok(reconstruction.includes("splitTouchingCrown"));
   assert.ok(raster.includes("reconstruction: evidence.reconstruction || evidence.canopyGeometry || null"));
   assert.ok(generator.includes("normalizeTreeReconstruction(reconstruction"));
   assert.ok(generator.includes("crownReachFromTrunk(crownGeometry, angle)"));
