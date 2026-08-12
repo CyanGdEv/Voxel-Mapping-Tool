@@ -1,6 +1,7 @@
 import { crownRadiusAt, resolveTreeDimensions, selectTreePreset } from "./tree-presets.mjs";
 import { crownReachFromTrunk, insideCrownEnvelope, normalizeTreeReconstruction } from "./tree-reconstruction.mjs";
 import { inferTreeStructuralForm } from "./tree-structural-form.mjs";
+import { inferTreeTrunkLean, trunkAxisOffsetAt } from "./tree-trunk-lean.mjs";
 
 const TAU = Math.PI * 2;
 
@@ -34,6 +35,10 @@ export function compileHighFidelityTreeModel({
   const crownGeometry = normalizeTreeReconstruction(reconstruction, { crownRadius, crownBase: presetCrownBase, treeHeight });
   const crownBase = crownGeometry.crownBase;
   const structuralForm = inferTreeStructuralForm({ heightM, crownDiameterM, species, genus, leafType, tags, reconstruction });
+  const trunkLeanRaw = inferTreeTrunkLean({ heightM, crownDiameterM, tags, reconstruction });
+  const trunkLean = trunkLeanRaw.normalizedAt10m
+    ? { ...trunkLeanRaw, dxM: trunkLeanRaw.dxM * treeHeight / 10, dzM: trunkLeanRaw.dzM * treeHeight / 10, topShiftM: trunkLeanRaw.topShiftM * treeHeight / 10, normalizedAt10m: false }
+    : trunkLeanRaw;
   const treeSeed = seed ^ hashText(`${x}:${z}:${preset.id}`);
   const blocks = new Map();
 
@@ -50,11 +55,11 @@ export function compileHighFidelityTreeModel({
   const baseTrunkRadius = treeHeight >= 24 || crownDiameterM >= 15 ? 2
     : treeHeight >= 14 || crownDiameterM >= 9 ? 1 : 0;
   const trunkRadius = clamp(Math.round((baseTrunkRadius + 1) * structuralForm.trunkScale) - 1, 0, 3);
-  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed, structuralForm });
+  emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius: trunkRadius, preset, seed: treeSeed, structuralForm, trunkLean });
 
   const branchTips = emitMajorBranches({
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed: treeSeed, detailLevel, structuralForm
+    preset, seed: treeSeed, detailLevel, structuralForm, trunkLean
   });
 
   const palette = leafPalette.length ? leafPalette : preset.leaves;
@@ -93,11 +98,15 @@ export function compileHighFidelityTreeModel({
     structuralForm: structuralForm.form,
     structuralFormConfidence: structuralForm.confidence,
     structuralStemCount: structuralForm.stemCount,
-    structuralDeadwoodFraction: structuralForm.deadwoodFraction
+    structuralDeadwoodFraction: structuralForm.deadwoodFraction,
+    trunkLeanSource: trunkLean.source,
+    trunkLeanConfidence: trunkLean.confidence,
+    trunkLeanTopShiftBlocks: trunkLean.topShiftM,
+    trunkLeanVectorBlocks: { x: trunkLean.dxM, z: trunkLean.dzM }
   };
 }
 
-function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed, structuralForm }) {
+function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, seed, structuralForm, trunkLean }) {
   const stems = Math.max(1, Math.min(5, structuralForm?.stemCount || 1));
   const stemOffsets = [{ x: 0, z: 0 }];
   for (let stem = 1; stem < stems; stem += 1) {
@@ -106,12 +115,15 @@ function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, see
   }
   for (const stemOffset of stemOffsets) for (let dy = 1; dy <= trunkHeight; dy += 1) {
     const t = dy / trunkHeight;
+    const axis = trunkAxisOffsetAt(trunkLean, t);
+    const axisX = x + Math.round(axis.x);
+    const axisZ = z + Math.round(axis.z);
     const localRadius = t > 0.72 ? Math.max(0, radius - 1) : radius;
     for (let dz = -localRadius; dz <= localRadius; dz += 1) {
       for (let dx = -localRadius; dx <= localRadius; dx += 1) {
         if (dx * dx + dz * dz > (localRadius + 0.25) ** 2) continue;
         const bark = pick(preset.trunk, hash3d(x + dx, groundY + dy, z + dz, seed));
-        put(x + stemOffset.x + dx, groundY + dy, z + stemOffset.z + dz, bark, "trunk");
+        put(axisX + stemOffset.x + dx, groundY + dy, axisZ + stemOffset.z + dz, bark, "trunk");
       }
     }
   }
@@ -129,13 +141,16 @@ function emitTaperedTrunk({ put, x, z, groundY, trunkHeight, radius, preset, see
 function emitMajorBranches(context) {
   const {
     put, x, z, groundY, treeHeight, trunkHeight, crownBase, crownRadius, crownGeometry,
-    preset, seed, detailLevel, structuralForm
+    preset, seed, detailLevel, structuralForm, trunkLean
   } = context;
   const tiers = clamp(Math.round(preset.branchTiers), 2, 10);
   const tips = [];
   for (let tier = 0; tier < tiers; tier += 1) {
     const t = tiers === 1 ? 0.5 : tier / (tiers - 1);
     const y = clamp(Math.round(crownBase + t * Math.max(1, trunkHeight - crownBase)), crownBase, treeHeight - 2);
+    const branchAxis = trunkAxisOffsetAt(trunkLean, y / Math.max(1, trunkHeight));
+    const branchOriginX = x + branchAxis.x;
+    const branchOriginZ = z + branchAxis.z;
     const min = preset.branchCount[0], max = preset.branchCount[1];
     const rawCount = min + hash3d(x + tier, y, z - tier, seed) % (max - min + 1);
     const count = detailLevel === "medium" ? Math.max(3, Math.round(rawCount * 0.7)) : rawCount;
@@ -150,10 +165,10 @@ function emitMajorBranches(context) {
       const rise = preset.family === "conifer"
         ? (0.12 - t * 0.2) * length
         : (0.18 + random01(seed, branch * 31 + tier) * 0.18 - preset.branchDroop) * length;
-      const tipX = x + Math.cos(angle) * length;
-      const tipZ = z + Math.sin(angle) * length;
+      const tipX = branchOriginX + Math.cos(angle) * length;
+      const tipZ = branchOriginZ + Math.sin(angle) * length;
       const tipY = groundY + y + rise;
-      emitLine(put, [x, groundY + y, z], [tipX, tipY, tipZ], preset.branches, "branch", seed ^ (tier * 131 + branch));
+      emitLine(put, [branchOriginX, groundY + y, branchOriginZ], [tipX, tipY, tipZ], preset.branches, "branch", seed ^ (tier * 131 + branch));
       const tip = { x: Math.round(tipX), y: Math.round(tipY), z: Math.round(tipZ), angle, tier: t };
       tips.push(tip);
       if (detailLevel !== "low") emitSecondaryTwigs({ put, tip, preset, crownRadius, seed: seed ^ hashText(`${tier}:${branch}`) });
