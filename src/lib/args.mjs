@@ -8,7 +8,8 @@ const VALUE_FLAGS = new Set([
   "public-data", "source-fusion-tolerance-m", "source-config", "os-openmap-local",
   "planning", "planning-manifest", "planning-world-authority", "max-planning-document-mb",
   "planit-url", "max-planning-applications", "max-planning-documents",
-  "max-planning-pages-per-document", "planning-georef-min-confidence",
+  "max-planning-pages-per-document", "planning-georef-min-confidence", "planning-plan",
+  "planning-shard-index", "planning-shard-count",
   "planning-datasets", "planning-data-url", "trees-outside-woodland-url",
   "trees-outside-woodland-collection", "microsoft-buildings-index-url",
   "microsoft-buildings-min-confidence", "wikidata-url", "wikidata-limit",
@@ -124,7 +125,8 @@ function normalize(options) {
     "maxVegetationModels", "microsoftBuildingsMinConfidence", "wikidataLimit", "page",
     "wikimediaCommonsLimit", "maxSupplementalFeatures", "supplementalPageSize",
     "maxSupplementalDownloadMb", "maxPlanningDocumentMb", "maxPlanningApplications",
-    "maxPlanningDocuments", "maxPlanningPagesPerDocument", "planningGeorefMinConfidence"
+    "maxPlanningDocuments", "maxPlanningPagesPerDocument", "planningGeorefMinConfidence",
+    "planningShardIndex", "planningShardCount"
   ];
   for (const key of numberKeys) {
     if (options[key] === undefined) continue;
@@ -182,6 +184,15 @@ function normalize(options) {
     if (options[key] !== undefined && (!Number.isInteger(options[key]) || options[key] < minimum || options[key] > maximum)) {
       throw new UserError(`--${toKebab(key)} must be an integer between ${minimum} and ${maximum}`);
     }
+  }
+  if (options.planningShardCount !== undefined &&
+    (!Number.isInteger(options.planningShardCount) || options.planningShardCount < 1 || options.planningShardCount > 64)) {
+    throw new UserError("--planning-shard-count must be an integer between 1 and 64");
+  }
+  if (options.planningShardIndex !== undefined &&
+    (!Number.isInteger(options.planningShardIndex) || options.planningShardIndex < 0 ||
+      options.planningShardIndex >= (options.planningShardCount ?? 1))) {
+    throw new UserError("--planning-shard-index must be zero-based and smaller than --planning-shard-count");
   }
   if (options.planningGeorefMinConfidence !== undefined &&
     (options.planningGeorefMinConfidence < 0.5 || options.planningGeorefMinConfidence > 1)) {

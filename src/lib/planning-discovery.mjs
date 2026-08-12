@@ -2,7 +2,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, rm } from "node:fs/promises";
-import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, sha256File } from "./io.mjs";
+import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256File } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
 import {
   autoGeoreferencePlanningPage,
@@ -41,29 +41,36 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
     return result;
   }
 
-  const limits = discoveryLimits(options);
   const planningRuntime = {
     ...runtime,
     planningPortalHealth: runtime.planningPortalHealth || new Map()
   };
+  const plan = options.planningPlan
+    ? await readJson(path.resolve(options.planningPlan))
+    : await createAutomaticPlanningPlan(options, planningRuntime);
+  return processAutomaticPlanningPlan(plan, options, planningRuntime);
+}
+
+export async function createAutomaticPlanningPlan(options, runtime) {
+  const profile = options.parkProfile;
+  if (!profile?.planningDiscovery) throw new Error("Automatic planning plan requires a supported park profile");
+  const limits = discoveryLimits(options);
+  const planningRuntime = { ...runtime, planningPortalHealth: runtime.planningPortalHealth || new Map() };
   const discovery = await discoverPlanningApplications(profile, options, planningRuntime, limits);
-  result.discovery = discovery.summary;
-  result.failures.push(...discovery.failures);
-  result.warnings.push(...discovery.warnings);
   emitProgress(planningRuntime,
     `Planning discovery: ${discovery.applications.length}/${discovery.summary.relevantApplications} relevant application(s) selected from ${discovery.summary.candidates} candidate(s); ${discovery.summary.rejectedApplications} rejected before portal crawl`);
-
   const applications = discovery.applications.slice(0, limits.applications);
   const documentQueue = [];
+  const failures = [...discovery.failures], warnings = [...discovery.warnings], crawledApplications = [];
   for (let start = 0; start < applications.length && documentQueue.length < limits.documents;
     start += APPLICATION_CRAWL_CONCURRENCY) {
     const batch = applications.slice(start, start + APPLICATION_CRAWL_CONCURRENCY);
     const crawledBatch = await Promise.all(batch.map((application) =>
       crawlApplicationDocuments(application, profile, options, planningRuntime, limits)));
     for (const crawled of crawledBatch) {
-      result.failures.push(...crawled.failures);
-      result.warnings.push(...crawled.warnings);
-      result.applications.push(crawled.application);
+      failures.push(...crawled.failures);
+      warnings.push(...crawled.warnings);
+      crawledApplications.push(crawled.application);
       for (const document of crawled.documents) {
         if (documentQueue.length >= limits.documents) break;
         documentQueue.push({ document, application: crawled.application });
@@ -72,6 +79,53 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
     emitProgress(planningRuntime,
       `Planning crawl: ${Math.min(start + batch.length, applications.length)}/${applications.length} application(s), ${documentQueue.length}/${limits.documents} relevant document(s)`);
   }
+
+  return {
+    schemaVersion: 1,
+    marker: "TPMAP_AUTOMATIC_PLANNING_PLAN_V1",
+    parkId: profile.id,
+    createdAt: new Date().toISOString(),
+    discovery: discovery.summary,
+    applications: crawledApplications,
+    documentQueue,
+    failures,
+    warnings
+  };
+}
+
+export async function prepareAutomaticPlanningShard(plan, options, runtime) {
+  validateAutomaticPlanningPlan(plan, options.parkProfile);
+  const shardCount = Number(options.planningShardCount ?? 1);
+  const shardIndex = Number(options.planningShardIndex ?? 0);
+  const queue = selectPlanningShard(plan.documentQueue, shardIndex, shardCount);
+  const limits = discoveryLimits(options);
+  let processed = 0, acquired = 0, rawDocumentCacheHits = 0, pageResults = 0;
+  const failures = [];
+  await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+    const value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits);
+    processed += 1;
+    if (value.evidence.acquired) acquired += 1;
+    if (value.evidence.cacheHit) rawDocumentCacheHits += 1;
+    pageResults += value.evidence.extraction.length;
+    failures.push(...value.failures);
+    emitProgress(runtime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
+  });
+  return {
+    schemaVersion: 1, parkId: plan.parkId, shardIndex, shardCount,
+    assigned: queue.length, processed, acquired, rawDocumentCacheHits, pageResults, failures
+  };
+}
+
+async function processAutomaticPlanningPlan(plan, options, planningRuntime) {
+  const profile = options.parkProfile;
+  validateAutomaticPlanningPlan(plan, profile);
+  const limits = discoveryLimits(options);
+  const result = automaticResult(profile);
+  result.discovery = plan.discovery;
+  result.failures.push(...(plan.failures || []));
+  result.warnings.push(...(plan.warnings || []));
+  result.applications.push(...plan.applications);
+  const documentQueue = plan.documentQueue.slice(0, limits.documents);
 
   let processedCount = 0;
   const processedDocuments = await mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
@@ -119,6 +173,19 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
     );
   }
   return result;
+}
+
+export function selectPlanningShard(documentQueue, shardIndex, shardCount) {
+  if (!Number.isInteger(shardCount) || shardCount < 1 || !Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
+    throw new Error("Invalid planning shard selection");
+  }
+  return documentQueue.filter((_, index) => index % shardCount === shardIndex);
+}
+
+function validateAutomaticPlanningPlan(plan, profile) {
+  if (plan?.schemaVersion !== 1 || plan?.marker !== "TPMAP_AUTOMATIC_PLANNING_PLAN_V1") throw new Error("Unsupported automatic planning plan");
+  if (plan.parkId !== profile?.id) throw new Error(`Planning plan park mismatch: ${plan.parkId || "unknown"}`);
+  if (!Array.isArray(plan.applications) || !Array.isArray(plan.documentQueue)) throw new Error("Automatic planning plan arrays are missing");
 }
 
 export async function discoverPlanningApplications(profile, options = {}, runtime = {}, suppliedLimits = null) {

@@ -7,11 +7,18 @@ import { ensureDir, readJson, writeJson, writeText } from "./lib/io.mjs";
 import { buildPark } from "./lib/pipeline.mjs";
 import { applyParkProfile, listParkProfiles, loadParkProfile } from "./lib/park-profile.mjs";
 import { extractRasterPlanningPage } from "./lib/planning-raster-extraction.mjs";
+import {
+  createAutomaticPlanningPlan,
+  prepareAutomaticPlanningShard
+} from "./lib/planning-discovery.mjs";
+import { bboxCenter } from "./lib/geo.mjs";
 
 const HELP = `Voxel Mapping Tool 0.2.0 — automatic evidence-first 1:1 theme-park-to-Bedrock compiler
 
 Usage
   voxel-map build --park PARK [options]
+  voxel-map planning-plan --park PARK --out planning-plan.json
+  voxel-map prepare-planning --park PARK --planning-plan planning-plan.json --planning-shard-index 0 --planning-shard-count 20
   voxel-map parks
   voxel-map extract-plan --input DRAWING.pdf [--page 1] [--out DIRECTORY]
   voxel-map inspect --osm FILE [--bbox S,W,N,E]
@@ -47,6 +54,9 @@ Core options
   --max-planning-documents 160    Bounded relevant-document download limit
   --max-planning-pages-per-document 20
                                     Bounded drawing-page extraction limit
+  --planning-plan FILE              Frozen automatic document queue produced by planning-plan
+  --planning-shard-index N          Zero-based extraction shard (CI preparation command)
+  --planning-shard-count N          Total extraction shards; every document remains covered once
   --planning-georef-min-confidence .72
                                     Minimum automatic drawing alignment confidence
   --planning-world-authority planning-only|fixture
@@ -305,8 +315,33 @@ async function main() {
     console.log(JSON.stringify({ svg, semantics, derivativeCache: result.derivativeCache }, null, 2));
     return;
   }
-  if (command !== "build") throw new UserError(`Unknown command: ${command}`);
+  if (!["build", "planning-plan", "prepare-planning"].includes(command)) throw new UserError(`Unknown command: ${command}`);
   if (options.park) options = applyParkProfile(options, await loadParkProfile(options.park));
+  if (["planning-plan", "prepare-planning"].includes(command)) {
+    if (!options.parkProfile) throw new UserError(`${command} requires --park`);
+    const cacheDir = path.resolve(options.cache || ".tpmap-cache");
+    await ensureDir(cacheDir);
+    const contact = options.contact || process.env.TPMAP_CONTACT;
+    const runtime = {
+      bbox: options.parkProfile.bbox,
+      center: bboxCenter(options.parkProfile.bbox),
+      cacheDir,
+      userAgent: contact ? `VoxelMappingTool/0.2.0 (${contact})` : "VoxelMappingTool/0.2.0",
+      progress: options.quiet ? () => {} : (message) => console.error(`• ${message}`)
+    };
+    if (command === "planning-plan") {
+      const plan = await createAutomaticPlanningPlan(options, runtime);
+      const output = path.resolve(options.out || "planning-plan.json");
+      await writeJson(output, plan, 0);
+      console.log(JSON.stringify({ output, applications: plan.applications.length, documents: plan.documentQueue.length }, null, 2));
+      return;
+    }
+    if (!options.planningPlan) throw new UserError("prepare-planning requires --planning-plan FILE");
+    const plan = await readJson(path.resolve(options.planningPlan));
+    const summary = await prepareAutomaticPlanningShard(plan, options, runtime);
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
   const progress = options.quiet ? () => {} : (message) => console.error(`• ${message}`);
   const result = await buildPark(options, progress);
   console.log(JSON.stringify(result, null, 2));
