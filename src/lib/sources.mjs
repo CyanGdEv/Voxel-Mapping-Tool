@@ -3,6 +3,7 @@ import { bboxAreaKm2, bboxCenter, createProjector, parseBbox } from "./geo.mjs";
 import { UserError, invariant } from "./errors.mjs";
 import { cachedJson, ensureDir, fetchJson, readJson, sha256 } from "./io.mjs";
 import { acquireLidarElevation } from "./lidar.mjs";
+import { acquirePreferredEaLidar } from "./lidar-high-resolution.mjs";
 import { acquireOrthophotos } from "./orthophoto.mjs";
 import { acquireSupplementalSources } from "./supplemental-sources.mjs";
 import { acquirePlanningEvidence } from "./planning-manifest.mjs";
@@ -201,9 +202,8 @@ async function acquireElevation(options) {
       warning: "No terrain source was selected; a flat verified datum will be used."
     };
   }
-  if (provider === "ea-lidar" || provider === "geotiff") {
-    return acquireLidarElevation(options, provider);
-  }
+  if (provider === "ea-lidar") return acquirePreferredEaLidar(options);
+  if (provider === "geotiff") return acquireLidarElevation(options, provider);
   if (provider !== "open-meteo") throw new UserError(`Unsupported elevation provider: ${provider}`);
   invariant(options.acceptOpenMeteoTerms,
     "Open-Meteo elevation requires --accept-open-meteo-terms. Commercial use requires an appropriate plan/API endpoint.");
