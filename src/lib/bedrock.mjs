@@ -89,7 +89,7 @@ Explicit anchor: /scriptevent tpmap:build X Y Z
 Track evidence colours: cyan survey/CAD, blue planning drawing, lime LiDAR-derived, gold interpolated, yellow inferred.
 Orange track is a 2D ground-plan marker where public data did not include a usable 3D coaster profile.
 Yellow outlines are mapped building/structure footprints. Named footprints have two-sided signs.
-Player-readable signs at spawn and beside named rides explain vertical coverage, confidence, and whether banking is known.
+Player-readable signs at spawn and beside named rides explain vertical coverage, confidence, and the fixed one-block centreline representation.
 
 Scale: 1 block = 1 metre
 Confidence: ${(compilation.meta.confidence * 100).toFixed(1)}% (${compilation.meta.evidenceGrade})

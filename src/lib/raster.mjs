@@ -455,6 +455,10 @@ function compileVerticalFeatures(context) {
     groundPlanRideTracks: 0,
     verticallyTaggedRideTracks: 0,
     profiledRideTracks: 0,
+    rideTrackRepresentation: "one-block-centreline",
+    rideTrackWidthBlocks: 1,
+    rideBankingRendered: false,
+    rideCrossTiesRendered: false,
     rideProfileBlocks: 0,
     rideProfileEvidenceBlocks: {},
     partialRideProfileTracks: 0,
@@ -470,6 +474,12 @@ function compileVerticalFeatures(context) {
     rideSupportFrames: 0,
     rideSupportBlocks: 0,
     rideSupportFootings: 0,
+    rideAttachmentFeatures: 0,
+    rideAttachmentRendered: 0,
+    rideAttachmentWithheld: 0,
+    rideAttachmentBlocks: 0,
+    rideAttachmentTypes: {},
+    rideAttachmentEvidence: [],
     rideStructureEvidence: [],
     signsAtMappedEntrances: 0,
     signsNearMappedPaths: 0,
@@ -611,6 +621,19 @@ function compileVerticalFeatures(context) {
         minX, minZ, width, height, signs, usedSignCells, assignedEntrance
       });
       recordBuildingSignStats(stats, sign);
+      continue;
+    }
+
+    if (feature.kind === "ride_attachment") {
+      const result = compileRideAttachment({
+        add, feature, mask, elevationY, minX, minZ, width, height, minDatum
+      });
+      stats.rideAttachmentFeatures += 1;
+      stats.rideAttachmentRendered += result.rendered ? 1 : 0;
+      stats.rideAttachmentWithheld += result.rendered ? 0 : 1;
+      stats.rideAttachmentBlocks += result.blocks;
+      stats.rideAttachmentTypes[result.type] = (stats.rideAttachmentTypes[result.type] || 0) + 1;
+      stats.rideAttachmentEvidence.push(result.evidence);
       continue;
     }
 
@@ -1056,7 +1079,7 @@ function isRockSurface(feature) {
 function buildTerrainDetailExclusion(map, mask, raster) {
   const excluded = new Uint8Array(mask.length);
   const kinds = new Set([
-    "building", "structure", "water", "attraction", "ride_track", "ride_support", "rail"
+    "building", "structure", "water", "attraction", "ride_track", "ride_support", "ride_attachment", "rail"
   ]);
   for (const feature of map.features) {
     if (!kinds.has(feature.kind)) continue;
@@ -1456,7 +1479,7 @@ function compileTreeModel({ add, x, z, groundY, heightM, crownDiameterM, leafTyp
 
 function compileRideProfileTrack(context) {
   const {
-    add, feature, mask, elevationY, accessSurface, minX, minZ, width, height, minDatum, options = {}
+    add, feature, mask, elevationY, minX, minZ, width, height, minDatum, options = {}
   } = context;
   const terrainMode = options.rideTerrainMode || "inferred";
   const settings = rideStructureSettings(feature, options);
@@ -1466,9 +1489,6 @@ function compileRideProfileTrack(context) {
   const tunnelInterior = new Set();
   const tunnelLining = new Set();
   const portalVoxels = new Set();
-  const supportVoxels = new Set();
-  const supportFootingVoxels = new Set();
-  const supportFrameKeys = new Set();
   const tunnelTrackKeys = new Set();
   const inferredTunnelTrackKeys = new Set();
   let terrainDetectedTunnel = false;
@@ -1553,20 +1573,12 @@ function compileRideProfileTrack(context) {
         mask, minX, minZ, width, height
       });
     }
-    if (terrainMode === "inferred" && !explicitTunnel) {
-      compileInferredRideSupports({
-        orderedTrack, settings, supportVoxels, supportFootingVoxels, supportFrameKeys,
-        mask, elevationY, accessSurface, minX, minZ, width, height
-      });
-    }
   }
 
   for (const key of tunnelInterior) tunnelLining.delete(key);
   emitVoxelRuns(add, 6, tunnelLining, "minecraft:tuff");
   emitVoxelRuns(add, 7, tunnelInterior, "minecraft:air");
   emitVoxelRuns(add, 8, portalVoxels, "minecraft:stone_bricks");
-  emitVoxelRuns(add, 8, supportVoxels, "minecraft:iron_bars");
-  emitVoxelRuns(add, 8, supportFootingVoxels, "minecraft:yellow_concrete");
 
   let flatBlocks = 0;
   for (const voxel of voxels.values()) {
@@ -1578,6 +1590,10 @@ function compileRideProfileTrack(context) {
     featureId: feature.id,
     name: feature.name || null,
     mode: terrainMode,
+    representation: "one-block-centreline",
+    widthBlocks: 1,
+    bankingRendered: false,
+    crossTiesRendered: false,
     explicitTunnel,
     tunnelSemantics: explicitTunnel ? {
       tunnel: feature.tags?.tunnel || null,
@@ -1598,12 +1614,10 @@ function compileRideProfileTrack(context) {
     portalFrames,
     portalBlocks: portalVoxels.size,
     terrainDetectedTunnel,
-    supportFrames: supportFrameKeys.size,
-    supportBlocks: supportVoxels.size,
-    supportFootings: supportFootingVoxels.size,
-    supportMethod: supportFrameKeys.size
-      ? `inferred ${settings.supportSpacingM} m spacing, DTM-grounded A-frames, mapped path/road footing exclusion`
-      : "none"
+    supportFrames: 0,
+    supportBlocks: 0,
+    supportFootings: 0,
+    supportMethod: "detected-planning-support-features-only"
   };
   return {
     blocks: voxels.size - flatBlocks,
@@ -1617,9 +1631,9 @@ function compileRideProfileTrack(context) {
     liningBlocks: tunnelLining.size,
     portalFrames,
     portalBlocks: portalVoxels.size,
-    supportFrames: supportFrameKeys.size,
-    supportBlocks: supportVoxels.size,
-    supportFootings: supportFootingVoxels.size,
+    supportFrames: 0,
+    supportBlocks: 0,
+    supportFootings: 0,
     evidence
   };
 }
@@ -1657,9 +1671,7 @@ function rideStructureSettings(feature, options) {
     ], 2, 1, 8)),
     coverM: Math.round(positive([
       tags.tunnel_cover_m, tags["tunnel:cover"], options.rideTunnelCoverM
-    ], 1, 1, 12)),
-    supportSpacingM: positive([tags.support_spacing_m, options.rideSupportSpacingM], 6, 3, 30),
-    supportMinHeightM: positive([tags.support_min_height_m, options.rideSupportMinHeightM], 4, 2, 30)
+    ], 1, 1, 12))
   };
 }
 
@@ -1796,85 +1808,6 @@ function stampPortalFrame(point, tangent, settings, target, raster) {
   }
 }
 
-function compileInferredRideSupports(context) {
-  const {
-    orderedTrack, settings, supportVoxels, supportFootingVoxels, supportFrameKeys,
-    mask, elevationY, accessSurface, minX, minZ, width, height
-  } = context;
-  if (orderedTrack.length < 2) return;
-  let travelled = 0;
-  let nextSupport = settings.supportSpacingM / 2;
-  for (let index = 1; index < orderedTrack.length; index += 1) {
-    const prior = orderedTrack[index - 1], point = orderedTrack[index];
-    const dx = point.x - prior.x, dy = point.y - prior.y, dz = point.z - prior.z;
-    const distance = Math.hypot(dx, dy, dz);
-    if (!distance) continue;
-    travelled += distance;
-    if (travelled + 1e-6 < nextSupport) continue;
-    while (nextSupport <= travelled) nextSupport += settings.supportSpacingM;
-    if (point.tunnel || point.flat) continue;
-    const horizontal = Math.hypot(dx, dz);
-    if (horizontal < 0.5 || Math.abs(dy) / horizontal > 1.5) continue;
-    const rasterIndex = cellIndex(point.x, point.z, minX, minZ, width, height);
-    if (rasterIndex < 0 || !mask[rasterIndex]) continue;
-    const groundY = elevationY[rasterIndex];
-    if (point.y - groundY < settings.supportMinHeightM) continue;
-    const frameKey = `${point.x},${point.y},${point.z}`;
-    if (supportFrameKeys.has(frameKey)) continue;
-    if (stampSupportFrame({
-      point, tangent: { dx, dz }, supportVoxels, supportFootingVoxels,
-      mask, elevationY, accessSurface, minX, minZ, width, height
-    })) supportFrameKeys.add(frameKey);
-  }
-}
-
-function stampSupportFrame(context) {
-  const {
-    point, tangent, supportVoxels, supportFootingVoxels,
-    mask, elevationY, accessSurface, minX, minZ, width, height
-  } = context;
-  const alongX = Math.abs(tangent.dx) >= Math.abs(tangent.dz);
-  const offset = (distance) => alongX ? [0, distance] : [distance, 0];
-  const leftBase = offset(-2), rightBase = offset(2);
-  const leftTop = offset(-1), rightTop = offset(1);
-  const topY = point.y - 2;
-  for (const baseOffset of [leftBase, rightBase]) {
-    const baseIndex = cellIndex(point.x + baseOffset[0], point.z + baseOffset[1], minX, minZ, width, height);
-    if (baseIndex < 0 || !mask[baseIndex] || accessSurface?.[baseIndex]) return false;
-  }
-  let added = 0;
-  const leg = (baseOffset, topOffset) => {
-    const baseX = point.x + baseOffset[0], baseZ = point.z + baseOffset[1];
-    const baseIndex = cellIndex(baseX, baseZ, minX, minZ, width, height);
-    if (baseIndex < 0 || !mask[baseIndex]) return;
-    const groundY = elevationY[baseIndex];
-    if (topY <= groundY) return;
-    supportFootingVoxels.add(`${baseX},${groundY},${baseZ}`);
-    for (const [x, y, z] of line3dCells(
-      [baseX, groundY + 1, baseZ],
-      [point.x + topOffset[0], topY, point.z + topOffset[1]]
-    )) added += addSupportVoxel(x, y, z, context) ? 1 : 0;
-  };
-  leg(leftBase, leftTop);
-  leg(rightBase, rightTop);
-  const crossLeft = offset(-2), crossRight = offset(2);
-  for (const [x, y, z] of line3dCells(
-    [point.x + crossLeft[0], topY, point.z + crossLeft[1]],
-    [point.x + crossRight[0], topY, point.z + crossRight[1]]
-  )) added += addSupportVoxel(x, y, z, context) ? 1 : 0;
-  return added > 0;
-}
-
-function addSupportVoxel(x, y, z, context) {
-  const { supportVoxels, mask, elevationY, minX, minZ, width, height } = context;
-  const rasterIndex = cellIndex(x, z, minX, minZ, width, height);
-  if (rasterIndex < 0 || !mask[rasterIndex] || y <= elevationY[rasterIndex]) return false;
-  const key = `${x},${y},${z}`;
-  const before = supportVoxels.size;
-  supportVoxels.add(key);
-  return supportVoxels.size > before;
-}
-
 function emitVoxelRuns(add, phase, voxels, block) {
   const rows = new Map();
   for (const key of voxels) {
@@ -1975,12 +1908,10 @@ function compilePlayerEvidenceSigns(context) {
       "Not random scenery"
     ],
     [
-      "RIDE STRUCTURES",
-      "Tunnels: tagged/DTM",
-      (options.rideTerrainMode || "inferred") === "inferred" ? "Height gaps: yellow" : "No height inference",
-      (options.rideTerrainMode || "inferred") === "inferred"
-        ? `Supports: ${options.rideSupportSpacingM || 6}m prior`
-        : (options.rideTerrainMode || "inferred") === "evidence" ? "Supports: source" : "Structures: off"
+      "RIDE GEOMETRY",
+      "Track: 1-block line",
+      "Supports: detected",
+      "Catwalks: detected"
     ],
     [
       "NOT LIVE PARK INFO",
@@ -2021,7 +1952,10 @@ function compilePlayerEvidenceSigns(context) {
       evidence: {
         status: ride.status,
         verticalCoverage: ride.verticalCoverage,
-        bankingCoverage: ride.bankingCoverage,
+        representation: "one-block-centreline",
+        widthBlocks: 1,
+        bankingRendered: false,
+        crossTiesRendered: false,
         confidence: ride.confidence,
         primaryEvidence,
         latestEvidenceDate: ride.latestEvidenceDate || null
@@ -2111,15 +2045,12 @@ function rideEvidenceSignText(ride) {
   const nameLines = wrapSignLines(ride.name, 20).slice(0, 2);
   const vertical = Math.round(ride.verticalCoverage * 100);
   const confidence = Math.round(ride.confidence * 100);
-  const banking = Math.round(ride.bankingCoverage * 100);
   const sourceYear = String(ride.latestEvidenceDate || "").slice(0, 4);
   const profileLine = vertical
     ? `3D:${vertical}% Conf:${confidence}%`
     : "Track: 2D only";
-  const bankingLine = banking
-    ? `Bank:${banking}%${sourceYear ? ` Src:${sourceYear}` : ""}`
-    : `Bank:?${sourceYear ? ` Src:${sourceYear}` : ""}`;
-  return [...nameLines, profileLine, bankingLine].slice(0, 4).join("\n");
+  const representationLine = `Line:1 block${sourceYear ? ` ${sourceYear}` : ""}`;
+  return [...nameLines, profileLine, representationLine].slice(0, 4).join("\n");
 }
 
 function safeEvidenceText(value) {
@@ -2930,6 +2861,94 @@ function roofBlock(feature) {
 function buildingFloorBlock(feature) {
   if (feature.tags?.material === "wood" || feature.tags?.["building:material"] === "wood") return "minecraft:spruce_planks";
   return "minecraft:smooth_stone";
+}
+
+function compileRideAttachment({ add, feature, mask, elevationY, minX, minZ, width, height, minDatum }) {
+  const reconstruction = feature.rideAttachmentReconstruction;
+  const type = String(reconstruction?.attachmentType || feature.tags?.ride_attachment || "attachment")
+    .toLowerCase().replaceAll("-", "_");
+  const evidence = {
+    featureId: feature.id,
+    name: feature.name || null,
+    type,
+    geometryType: feature.localGeometry?.type || null,
+    geometrySource: "detected-planning-geometry",
+    geometryUnchanged: true,
+    generatedOffset: false,
+    mirroredSide: false,
+    status: reconstruction?.status || "withheld",
+    reason: reconstruction?.reason || "missing-evidence-bounded-reconstruction",
+    verticalMode: reconstruction?.verticalMode || null,
+    rideId: reconstruction?.rideId || null,
+    widthM: Number.isFinite(Number(feature.tags?.width)) ? Number(feature.tags.width) : null,
+    policy: "detected-geometry-only"
+  };
+  if (reconstruction?.status !== "resolved") return { rendered: false, blocks: 0, type, evidence };
+
+  const cells = new Set();
+  const lineWidthM = ["handrail", "fence"].includes(type) ? 1 : numericWidth(feature.tags?.width, 1);
+  for (const line of lineStrings(feature.localGeometry)) {
+    for (const [x, z] of lineCells(line, lineWidthM)) cells.add(`${x},${z}`);
+  }
+  for (const polygon of polygonParts(feature.localGeometry)) {
+    for (const [x1, x2, z] of polygonScanlineSpans(polygon)) {
+      for (let x = x1; x <= x2; x += 1) cells.add(`${x},${z}`);
+    }
+  }
+
+  const block = rideAttachmentBlock(type, feature);
+  const verticalBlocks = ["handrail", "fence"].includes(type)
+    ? Math.max(1, Math.round(feature.vertical?.heightM ?? 1))
+    : 1;
+  let blocks = 0;
+  let eligibleCells = 0;
+  for (const key of cells) {
+    const [x, z] = key.split(",").map(Number);
+    const index = cellIndex(x, z, minX, minZ, width, height);
+    if (index < 0 || !mask[index]) continue;
+    let y = null;
+    if (reconstruction.verticalMode === "terrain-following") y = elevationY[index] + 1;
+    else if (reconstruction.verticalMode === "explicit-elevation") {
+      y = Math.round(reconstruction.explicitElevationM - minDatum);
+    } else if (reconstruction.verticalMode === "track-relative") {
+      const elevationM = nearestResolvedRideElevation(
+        reconstruction.rideSamples, x, z, reconstruction.maxTrackDistanceM
+      );
+      if (elevationM !== null) y = Math.round(elevationM - minDatum);
+    }
+    if (!Number.isFinite(y)) continue;
+    add(8, x, y, z, x, y + verticalBlocks - 1, z, block);
+    eligibleCells += 1;
+    blocks += verticalBlocks;
+  }
+  evidence.status = eligibleCells ? "rendered" : "withheld";
+  evidence.reason = eligibleCells ? null : "no-elevation-resolved-cells-inside-boundary";
+  evidence.block = block;
+  evidence.cells = eligibleCells;
+  evidence.blocks = blocks;
+  return { rendered: eligibleCells > 0, blocks, type, evidence };
+}
+
+function nearestResolvedRideElevation(samples, x, z, maximumDistanceM = 12) {
+  let best = null;
+  for (const sample of samples || []) {
+    if (![sample?.x, sample?.y, sample?.z].every(Number.isFinite)) continue;
+    const distanceM = Math.hypot(sample.x - x, sample.z - z);
+    if (distanceM > maximumDistanceM) continue;
+    if (!best || distanceM < best.distanceM) best = { distanceM, elevationM: sample.y };
+  }
+  return best?.elevationM ?? null;
+}
+
+function rideAttachmentBlock(type, feature) {
+  const material = String(feature.tags?.surface || feature.tags?.material || "").toLowerCase();
+  if (["handrail", "fence"].includes(type)) {
+    return /wood|timber/.test(material) ? "minecraft:oak_fence" : "minecraft:iron_bars";
+  }
+  if (/wood|timber/.test(material)) return "minecraft:oak_planks";
+  if (/concrete|stone|paving/.test(material)) return "minecraft:smooth_stone";
+  if (type === "access_path" || type === "evacuation_stair") return "minecraft:light_gray_concrete";
+  return "minecraft:iron_block";
 }
 
 function compilePlanningRideSupport({ add, feature, mask, elevationY, minX, minZ, width, height }) {

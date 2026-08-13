@@ -265,9 +265,10 @@ function mapVertical(solid, registration) {
 }
 
 function classifyProduct(type, name) {
-  const semantic = classifyComprehensivePlanningLabel(`${name || ""} ${type}`)?.className;
-  const map = { ride:["ride_track","ifc-ride-track",{roller_coaster:"track"}], ride_support:["ride_support","ifc-ride-support",{roller_coaster:"support",man_made:"support"}], building:["building","ifc-building",{building:"yes"}], path:["path","ifc-path",{highway:"path"}], bridge:["path","ifc-bridge",{highway:"path",bridge:"yes"}], tunnel:["path","ifc-tunnel",{highway:"path",tunnel:"yes"}], wall:["barrier","ifc-wall",{barrier:"wall"}], fence:["barrier","ifc-fence",{barrier:"fence"}], water:["water","ifc-water",{natural:"water"}] };
-  if (map[semantic]) { const [kind, subtype, tags] = map[semantic]; return { kind, subtype, tags }; }
+  const semanticValue = classifyComprehensivePlanningLabel(`${name || ""} ${type}`);
+  const semantic = semanticValue?.className;
+  const map = { ride:["ride_track","ifc-ride-track",{roller_coaster:"track"}], ride_support:["ride_support","ifc-ride-support",{roller_coaster:"support",man_made:"support"}], ride_attachment:["ride_attachment",semanticValue?.featureClass || "ifc-ride-attachment",{man_made:"ride_attachment",ride_attachment:semanticValue?.attachmentType,ride_attachment_vertical_mode:semanticValue?.attachmentVerticalMode,ride_attachment_side:semanticValue?.attachmentSide}], building:["building","ifc-building",{building:"yes"}], path:["path","ifc-path",{highway:"path"}], bridge:["path","ifc-bridge",{highway:"path",bridge:"yes"}], tunnel:["path","ifc-tunnel",{highway:"path",tunnel:"yes"}], wall:["barrier","ifc-wall",{barrier:"wall"}], fence:["barrier","ifc-fence",{barrier:"fence"}], water:["water","ifc-water",{natural:"water"}] };
+  if (map[semantic]) { const [kind, subtype, rawTags] = map[semantic]; const tags = Object.fromEntries(Object.entries(rawTags).filter(([, value]) => value !== undefined && value !== null)); return { kind, subtype, tags }; }
   if (["IFCWALL","IFCWALLSTANDARDCASE","IFCRAILING"].includes(type)) return { kind:"barrier", subtype:type.includes("RAILING")?"ifc-railing":"ifc-wall", tags:{barrier:type.includes("RAILING")?"railing":"wall"} };
   if (["IFCSLAB","IFCROOF","IFCCOVERING","IFCBUILDING"].includes(type)) return { kind:"building", subtype:`ifc-${type.slice(3).toLowerCase()}`, tags:{building:"yes"} };
   if (["IFCSTAIR","IFCSTAIRFLIGHT","IFCRAMP","IFCRAMPFLIGHT"].includes(type)) return { kind:"path", subtype:`ifc-${type.slice(3).toLowerCase()}`, tags:{highway:type.includes("STAIR")?"steps":"path"} };

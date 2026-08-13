@@ -66,9 +66,9 @@ ${counts}
 - Tagged-height/LiDAR conflicts retained for review: ${accuracy.evidence.buildingHeightConflicts}
 - Ride tracks with vertical evidence: ${accuracy.evidence.rideTracksWithVerticalEvidence}/${accuracy.evidence.rideTracks}
 - Ride tracks with complete elevation profiles: ${accuracy.evidence.rideTracksWithFullElevation}/${accuracy.evidence.rideTracks}
-- Ride tracks with any banking evidence: ${accuracy.evidence.rideTracksWithBankingEvidence}/${accuracy.evidence.rideTracks}
 - Length-weighted ride elevation coverage: ${(accuracy.evidence.rideVerticalCoverage * 100).toFixed(1)}%
-- Length-weighted verified banking coverage: ${(accuracy.evidence.rideBankingCoverage * 100).toFixed(1)}%
+- Ride representation: one-block-wide 3D centreline; banking and cross ties are intentionally not rendered
+- Detected ride attachments resolved: ${accuracy.evidence.rideAttachmentsResolved}/${accuracy.evidence.rideAttachments}
 - Replacement 3D profiles requiring plan-alignment review: ${accuracy.evidence.ridePlanProfilesNeedingReview ?? 0}
 - Terrain source: ${elevation}
 - Valid terrain raster coverage: ${Number.isFinite(accuracy.evidence.terrainCoverage) ? `${(accuracy.evidence.terrainCoverage * 100).toFixed(1)}%` : "unknown"}
@@ -127,18 +127,20 @@ ${gaps}
 - Recovered-path terrain output: ${compilation?.meta?.pathTerrainOutput?.status || "not active"}; adjusted cells ${compilation?.meta?.pathTerrainOutput?.adjustedCells ?? 0}; cut/fill ${compilation?.meta?.pathTerrainOutput?.cutVolumeM3 ?? 0}/${compilation?.meta?.pathTerrainOutput?.fillVolumeM3 ?? 0} m³; maximum adjustment ${compilation?.meta?.pathTerrainOutput?.maxAdjustmentM ?? 0} m
 - Terrain-detail output: mode ${compilation?.meta?.verticalStats?.terrainDetailMode || "off"}; dimensioned rock models ${compilation?.meta?.verticalStats?.terrainRockDimensionedModels ?? 0}; exact position markers ${compilation?.meta?.verticalStats?.terrainRockPositionMarkers ?? 0}; inferred polygon clusters ${compilation?.meta?.verticalStats?.terrainInferredRockClusters ?? 0}; cliff marker blocks ${compilation?.meta?.verticalStats?.terrainCliffMarkerBlocks ?? 0}; total rock blocks ${compilation?.meta?.verticalStats?.terrainRockBlocks ?? 0}
 - 3D-profiled ride-track features: ${compilation?.meta?.verticalStats?.profiledRideTracks?.toLocaleString?.() ?? 0}
-- 3D ride-profile blocks emitted: ${compilation?.meta?.verticalStats?.rideProfileBlocks?.toLocaleString?.() ?? 0}
+- 3D ride-centreline blocks emitted: ${compilation?.meta?.verticalStats?.rideProfileBlocks?.toLocaleString?.() ?? 0}; fixed width: ${compilation?.meta?.verticalStats?.rideTrackWidthBlocks ?? 1} block
 - Ride-profile evidence blocks: ${formatObject(compilation?.meta?.verticalStats?.rideProfileEvidenceBlocks)}
+- Banking rendered: ${compilation?.meta?.verticalStats?.rideBankingRendered === true ? "yes" : "no"}; cross ties rendered: ${compilation?.meta?.verticalStats?.rideCrossTiesRendered === true ? "yes" : "no"}
+- Detected ride attachments rendered/withheld: ${compilation?.meta?.verticalStats?.rideAttachmentRendered?.toLocaleString?.() ?? 0}/${compilation?.meta?.verticalStats?.rideAttachmentWithheld?.toLocaleString?.() ?? 0}; blocks: ${compilation?.meta?.verticalStats?.rideAttachmentBlocks?.toLocaleString?.() ?? 0}; types: ${formatObject(compilation?.meta?.verticalStats?.rideAttachmentTypes)}
 - Ride terrain mode: ${compilation?.meta?.verticalStats?.rideTerrainMode || "off"}
 - Source-tagged ride tunnel features: ${compilation?.meta?.verticalStats?.rideExplicitTunnelFeatures?.toLocaleString?.() ?? 0}; terrain-detected tunnel features: ${compilation?.meta?.verticalStats?.rideTerrainDetectedTunnelFeatures?.toLocaleString?.() ?? 0}
 - Tunnel track blocks: ${compilation?.meta?.verticalStats?.rideTunnelTrackBlocks?.toLocaleString?.() ?? 0}; inferred-height tunnel track blocks: ${compilation?.meta?.verticalStats?.rideTunnelInferredTrackBlocks?.toLocaleString?.() ?? 0}
 - Tunnel excavation/lining blocks: ${compilation?.meta?.verticalStats?.rideTunnelExcavatedBlocks?.toLocaleString?.() ?? 0}/${compilation?.meta?.verticalStats?.rideTunnelLiningBlocks?.toLocaleString?.() ?? 0}; portal frames: ${compilation?.meta?.verticalStats?.rideTunnelPortalFrames?.toLocaleString?.() ?? 0}
-- DTM-grounded inferred support frames/blocks: ${compilation?.meta?.verticalStats?.rideSupportFrames?.toLocaleString?.() ?? 0}/${compilation?.meta?.verticalStats?.rideSupportBlocks?.toLocaleString?.() ?? 0}
+- Detected planning support frames/blocks: ${compilation?.meta?.verticalStats?.rideSupportFrames?.toLocaleString?.() ?? 0}/${compilation?.meta?.verticalStats?.rideSupportBlocks?.toLocaleString?.() ?? 0}
 - Spawn selection: ${compilation?.meta?.spawnLocal?.source || "unknown"}${compilation?.meta?.spawnLocal?.entranceFeatureId ? ` (${compilation.meta.spawnLocal.entranceFeatureId})` : ""}
 
-Track colours are evidence, not decoration: cyan is surveyed/manufacturer data, blue is a verified planning drawing, lime is LiDAR-derived, gold is bounded interpolation, yellow is inference, and orange is 2D plan geometry with no usable height profile. Ride-side signs expose vertical coverage, confidence, and banking coverage to players.
+Track colours are evidence, not decoration: cyan is surveyed/manufacturer data, blue is a verified planning drawing, lime is LiDAR-derived, gold is bounded interpolation, yellow is inference, and orange is 2D plan geometry with no usable height profile. Every ride track is a one-block centreline; ride-side signs expose vertical coverage and confidence to players.
 
-Tunnel excavation follows source-tagged underground topology and the terrain/profile intersection. Missing hidden elevations are filled only in \`ride-terrain-mode=inferred\`, remain yellow, and are counted separately. Support locations are likewise an explicitly labelled spacing prior unless a portable mapped/surveyed support source is supplied.
+Tunnel excavation follows source-tagged underground topology and the terrain/profile intersection. Missing hidden elevations are filled only in \`ride-terrain-mode=inferred\`, remain yellow, and are counted separately. Supports, catwalks, evacuation stairs, maintenance/station platforms, handrails, fences, and ride-access paths compile only from detected planning geometry; the compiler does not generate them from spacing or side-offset priors.
 
 ## Source provenance and licences
 
@@ -167,14 +169,15 @@ Guaranteed by this tool:
 - Every generated feature retains a source identifier and verification state.
 - Strict mode refuses output when configured evidence thresholds are not met.
 - The compiler does not silently label inferred vertical geometry as verified.
+- Ride tracks compile as exactly one block of centreline width, with no banking or cross ties.
+- Ride attachments retain their detected plan geometry and are withheld when vertical evidence cannot be resolved without fabrication.
 - OSM multipolygon outer members are assembled into parts and inner members are subtracted as holes.
 
 Not guaranteed by public data:
 
 - Completeness, recency, cadastral/survey accuracy, private backstage detail, interiors, individual vegetation, or exact architectural materials.
-- A roller coaster's 3D centreline, banking, supports, or tunnel profile where only a 2D public line is available. LiDAR-derived candidates remain explicitly distinct from survey/CAD geometry.
+- A roller coaster's 3D centreline elevation, supports, attachments, or tunnel profile where only a 2D public line is available. LiDAR-derived candidates remain explicitly distinct from survey/CAD geometry.
 - Tunnel tags prove relative underground topology, not the exact hidden bore, portal shape, structural lining, or rail elevation. The generic clearance envelope and any hidden-height interpolation are disclosed compiler assumptions.
-- Automatically generated support frames prove neither manufacturer type nor engineering load placement; they are terrain-anchored visual structure priors.
 - OSM \`layer\` values express relative stacking order, not a measured height; they are preserved as evidence and are never converted directly into metres.
 - Path connectivity is validated relative to fused source lines. It cannot prove that an obscured, private, newly built, or temporary path was absent from reality.
 - Overture is accepted only as conservative gap fill because its transportation product includes OSM-derived geometry; an Overture match is not counted as independent corroboration.
@@ -187,7 +190,7 @@ Not guaranteed by public data:
 - Orthophoto \`assist\` mode is QA-only. Its observations remain reviewable but cannot change path width, colour, material, pattern, or blocks until evidence mode's explicit provider and licence gate is satisfied.
 - ${terrainLimitation}
 
-For a defensible full 3D result, add verified ride centreline elevations, banking, supports, façade/material observations, and any survey overrides, then rerun with \`--strict\`.
+For a defensible full 3D result, add verified ride centreline elevations, detected support and attachment geometry, façade/material observations, and any survey overrides, then rerun with \`--strict\`.
 `;
 }
 

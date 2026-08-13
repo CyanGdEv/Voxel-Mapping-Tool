@@ -10,7 +10,7 @@
 6. Acquire OSM for coordinate registration and QA, plus public elevation, vegetation, water and imagery sources.
 7. Normalize accepted geometry to WGS84 and a local metre grid.
 8. Apply planning-only authority and physically remove OSM/Overture world features.
-9. Build the typed park reconstruction graph and resolve terrain, vertical observations, roofs, ride profiles, supports and vegetation.
+9. Build the typed park reconstruction graph and resolve terrain, vertical observations, roofs, one-block ride centrelines, detected supports/attachments and vegetation.
 10. Rasterize at exactly one metre, write LevelDB chunks, package `.mcworld`, and validate it with both the writer and an independent reader.
 
 ## Hard invariants
@@ -24,21 +24,24 @@
 - Missing/failed DWG conversion, unsupported IFC geometry, unsafe ZIP members and unregistered native geometry remain evidence-only; they are never rasterized or guessed into world authority merely because a native file exists.
 - A missing elevation stays null until planning, survey, DTM/DSM or traceable interpolation resolves it.
 - Interpolation is bounded between compatible ride anchors; no end extrapolation is performed.
+- Ride track output is exactly one block wide. Banking and cross ties are outside the representation.
+- Supports and ride attachments retain detected planning geometry; no spacing, mirroring or side-offset prior creates missing features.
 - Every named polygonal building/structure accepted into the compiler receives a native Bedrock sign.
 - Independent OS NGD geometry cannot override planning geometry; Tree Species Map classes are used only above the configured confidence gate and never fabricate an unmapped tree.
 - Build products are emitted only after evidence reports are written; strict mode can therefore fail while preserving diagnostics.
 
 ## Reconstruction graph
 
-The graph contains physical nodes, evidence-only observations and deterministic relationships. Node authority is separated into geometry and attributes. High-value relations include supports-to-rides, paths-to-buildings, bridges-to-water and barriers-to-paths.
+The graph contains physical nodes, evidence-only observations and deterministic relationships. Node authority is separated into geometry and attributes. High-value relations include supports-to-rides, attachments-to-rides, paths-to-buildings, bridges-to-water and barriers-to-paths.
 
 Advanced stages attach resolved states back to compiler features:
 
 - terrain: DTM/DSM samples and interactions;
 - vertical: ground/base/top/height evidence selection and conflict reporting;
 - roofs: footprint-aware DTM/DSM statistics and roof form evidence;
-- rides: planning elevation anchors, continuous bounded segments and 3D samples;
+- rides: planning elevation anchors, continuous bounded segments and one-block 3D centreline samples;
 - supports: planning support position/style, terrain footing and track connection;
+- ride attachments: detected catwalk, evacuation stair, maintenance/station platform, handrail, fence and access-path geometry, resolved against explicit elevation, terrain or nearby 3D ride samples;
 - vegetation: evidence-driven tree/canopy/shrub reconstruction.
 
 ## Material and block-shape contract

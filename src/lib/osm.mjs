@@ -259,6 +259,7 @@ function classify(tags) {
   if (tags.tourism === "theme_park") return { kind: "park_boundary", subtype: "theme_park" };
   if (tags.roller_coaster === "track") return { kind: "ride_track", subtype: tags["roller_coaster:track"] || "coaster" };
   if (tags.roller_coaster === "support") return { kind: "ride_support", subtype: "support" };
+  if (tags.man_made === "ride_attachment" || tags.ride_attachment) return { kind: "ride_attachment", subtype: tags.ride_attachment || "ride-attachment" };
   if (tags.roller_coaster === "station") return { kind: "building", subtype: "coaster_station" };
   if (tags.building) return { kind: "building", subtype: tags.building };
   if (tags.attraction) return { kind: "attraction", subtype: tags.attraction };

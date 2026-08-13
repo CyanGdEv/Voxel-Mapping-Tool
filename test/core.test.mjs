@@ -633,7 +633,7 @@ test("runs the offline 1:1 pipeline and packages a prebuilt Bedrock world", asyn
   assert.ok(!paletteManifest.emittedBlocks.includes("minecraft:deepslate_tiles"), "marker mode must not emit building roofs");
 });
 
-test("compiles a traceable 3D planning profile and keeps missing banking explicit", async () => {
+test("compiles a traceable one-block 3D centreline and ignores banking input", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "themepark-map-profile-"));
   const source = JSON.parse(await readFile(fixture, "utf8"));
   const track = source.elements.find((element) => element.tags?.roller_coaster === "track");
@@ -652,7 +652,8 @@ test("compiles a traceable 3D planning profile and keeps missing banking explici
         source_name: "Public planning elevation drawing",
         source_url: "https://example.gov/planning/evidence-coaster",
         license: "Open test licence",
-        checked_at: "2026-08-02T00:00:00Z"
+        checked_at: "2026-08-02T00:00:00Z",
+        banking_deg: track.geometry.map((_, index) => index * 5)
       },
       geometry: {
         type: "LineString",
@@ -678,18 +679,26 @@ test("compiles a traceable 3D planning profile and keeps missing banking explici
   assert.equal(profiles.totals.verticalCoverage, 1);
   assert.equal(profiles.totals.bankingCoverage, 0);
   const profiledRide = profiles.rides.find((ride) => ride.name === "Evidence Coaster");
-  assert.equal(profiledRide.status, "full-3d-elevation");
+  assert.equal(profiledRide.status, "full-3d-centreline");
+  assert.equal(profiledRide.representation, "one-block-centreline");
+  assert.equal(profiledRide.widthBlocks, 1);
+  assert.equal(profiledRide.bankingRendered, false);
+  assert.equal(profiledRide.crossTiesRendered, false);
   assert.equal(profiledRide.latestEvidenceDate, "2026-08-02T00:00:00.000Z");
   const evidence = JSON.parse(await readFile(result.paths.evidence, "utf8"));
   assert.equal(evidence.compilation.meta.verticalStats.profiledRideTracks, 1);
   assert.ok(evidence.compilation.meta.verticalStats.rideProfileBlocks > 0);
+  assert.equal(evidence.compilation.meta.verticalStats.rideTrackRepresentation, "one-block-centreline");
+  assert.equal(evidence.compilation.meta.verticalStats.rideTrackWidthBlocks, 1);
+  assert.equal(evidence.compilation.meta.verticalStats.rideBankingRendered, false);
+  assert.equal(evidence.compilation.meta.verticalStats.rideCrossTiesRendered, false);
   assert.equal(evidence.compilation.meta.verticalStats.playerInformationSigns, 7);
   assert.equal(evidence.compilation.meta.verticalStats.rideInformationSigns, 1);
-  assert.ok(evidence.accuracy.gaps.some((gap) => gap.code === "RIDE_BANKING_GEOMETRY_PARTIAL"));
+  assert.ok(!evidence.accuracy.gaps.some((gap) => gap.code === "RIDE_BANKING_GEOMETRY_PARTIAL"));
   assert.ok(!evidence.accuracy.gaps.some((gap) => gap.code === "RIDE_VERTICAL_GEOMETRY_ABSENT"));
 });
 
-test("excavates mapped ride tunnels and grounds inferred elevated supports", async () => {
+test("excavates mapped ride tunnels without fabricating elevated supports", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "themepark-map-ride-structures-"));
   const source = JSON.parse(await readFile(fixture, "utf8"));
   const track = source.elements.find((element) => element.tags?.roller_coaster === "track");
@@ -747,7 +756,6 @@ test("excavates mapped ride tunnels and grounds inferred elevated supports", asy
     rideProfile: [profilePath],
     rideProfileMode: "profile",
     rideTerrainMode: "inferred",
-    rideSupportSpacingM: 6,
     out: directory,
     maxCells: 200_000,
     noAddon: true
@@ -760,8 +768,8 @@ test("excavates mapped ride tunnels and grounds inferred elevated supports", asy
   assert.ok(stats.rideTunnelExcavatedBlocks > 0);
   assert.ok(stats.rideTunnelLiningBlocks > 0);
   assert.ok(stats.rideTunnelPortalFrames >= 2);
-  assert.ok(stats.rideSupportFrames > 0);
-  assert.ok(stats.rideSupportBlocks > 0);
+  assert.equal(stats.rideSupportFrames, 0);
+  assert.equal(stats.rideSupportBlocks, 0);
   const tunnelEvidence = stats.rideStructureEvidence.find((entry) => entry.featureId === "planning:tunnel-coaster");
   assert.deepEqual(tunnelEvidence.tunnelSemantics.inheritedFrom, ["osm:way:104"]);
   const geojson = JSON.parse(await readFile(result.paths.geojson, "utf8"));
@@ -769,9 +777,9 @@ test("excavates mapped ride tunnels and grounds inferred elevated supports", asy
   assert.equal(tunnelFeature.properties._ride_profile.planSemantics.alignment.status, "aligned-within-1m");
   const manifest = JSON.parse(await readFile(result.paths.worldManifest, "utf8"));
   assert.ok(manifest.rideOutput.tunnelExcavatedBlocks > 0);
-  assert.ok(manifest.rideOutput.supportFrames > 0);
+  assert.equal(manifest.rideOutput.supportFrames, 0);
   const palette = JSON.parse(await readFile(result.paths.blockPalette, "utf8"));
-  for (const block of ["minecraft:air", "minecraft:tuff", "minecraft:stone_bricks", "minecraft:iron_bars"]) {
+  for (const block of ["minecraft:air", "minecraft:tuff", "minecraft:stone_bricks"]) {
     assert.ok(palette.emittedBlocks.includes(block));
   }
 });

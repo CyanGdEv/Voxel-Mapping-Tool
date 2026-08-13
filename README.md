@@ -71,15 +71,16 @@ node src/cli.mjs build \
 | 4 | Other licensed public observations | Corroboration, labels or explicit gap-fill under recorded policy |
 | — | OSM and OSM-derived Overture | Registration, source discovery and QA only; never emitted in `planning-only` worlds |
 
-Unknown detail remains unknown in `verified` mode. The compiler does not silently convert a planning proposal into current reality, infer banking, or treat a public-register PDF as redistributable.
+Unknown detail remains unknown in `verified` mode. Ride layouts compile as a one-block-wide 3D centreline with no banking or cross ties. Supports and ride attachments are included only when their geometry is detected in accepted evidence; the compiler does not silently convert a planning proposal into current reality or treat a public-register PDF as redistributable.
 
 ## What the compiler reconstructs
 
 - exact 1 metre horizontal and vertical voxel scale;
 - planning-authoritative paths, plazas, queues, buildings, walls, fences, water, vegetation and ride alignments;
 - DTM terrain and DSM-derived roof/surface elevation where matching LiDAR exists;
-- planning elevation anchors into bounded 3D ride profiles, without extrapolating unresolved gaps;
+- planning elevation anchors into bounded one-block 3D ride centrelines, without extrapolating unresolved gaps;
 - explicit support styles (`column`, `a-frame`, `portal`, `lattice`) and grounded footings;
+- detected catwalks, evacuation stairs, maintenance/station platforms, handrails, ride fences and access paths, with no generated offsets or mirrored sides;
 - material-specific deterministic paving recipes and patterns;
 - evidence-driven slabs, stairs, walls, fences and trapdoors through planning `minecraft_shape` tags;
 - trees, tree cover, shrubs, hedges, retaining walls, tunnels and bridge structures;

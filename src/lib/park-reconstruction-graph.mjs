@@ -6,12 +6,13 @@
 const SCHEMA_VERSION = 1;
 const CELL_SIZE_M = 24;
 const PHYSICAL_KINDS = new Set([
-  "ride_track", "ride_support", "building", "path", "road", "bridge", "tunnel",
+  "ride_track", "ride_support", "ride_attachment", "building", "path", "road", "bridge", "tunnel",
   "barrier", "structure", "water", "vegetation", "terrain_detail", "surface",
   "attraction", "amenity", "rail", "detail"
 ]);
 const RELATION_PRIORITIES = Object.freeze({
   "supports-ride": 100,
+  "attachment-follows-ride": 98,
   "bridge-crosses-water": 95,
   "path-connects-building": 85,
   "barrier-bounds-path": 80,
@@ -329,6 +330,7 @@ function reconstructionType(feature) {
   if (kind === "park_boundary") return null;
   if (kind === "ride_track") return "ride-track";
   if (kind === "ride_support") return "ride-support";
+  if (kind === "ride_attachment") return "ride-attachment";
   if (kind === "building") return "building";
   if (kind === "path" || kind === "road") {
     if (truthy(tags.bridge) || subtype.includes("bridge") || subtype.includes("boardwalk")) return "bridge";
@@ -427,7 +429,12 @@ function semanticModel(feature) {
     layer: finiteOrNull(tags.layer),
     widthM: finiteOrNull(tags.width),
     diameterM: finiteOrNull(tags.diameter_m),
-    canopyDiameterM: finiteOrNull(tags.canopy_diameter_m)
+    canopyDiameterM: finiteOrNull(tags.canopy_diameter_m),
+    rideAttachmentType: tags.ride_attachment || null,
+    rideAttachmentVerticalMode: tags.ride_attachment_vertical_mode || null,
+    rideAttachmentSide: tags.ride_attachment_side || null,
+    rideId: tags.ride_id || tags.ride_ref || null,
+    parentRideId: tags.parent_ride_id || null
   };
 }
 
@@ -470,6 +477,7 @@ function inferRelationships(nodes) {
   const seen = new Set();
 
   connectNearestN({ from: byType.get("ride-support") || [], to: byType.get("ride-track") || [], maxDistanceM: 30, maxPerSource: 1, type: "supports-ride", relationships, seen });
+  connectNearestN({ from: byType.get("ride-attachment") || [], to: byType.get("ride-track") || [], maxDistanceM: 20, maxPerSource: 1, type: "attachment-follows-ride", relationships, seen });
   connectNearestN({ from: byType.get("bridge") || [], to: byType.get("water") || [], maxDistanceM: 3, maxPerSource: 2, type: "bridge-crosses-water", requireBoundsOverlap: true, relationships, seen });
   connectNearestN({ from: byType.get("building") || [], to: byType.get("path") || [], maxDistanceM: 12, maxPerSource: 3, type: "path-connects-building", reverse: true, relationships, seen });
   connectNearestN({ from: byType.get("barrier") || [], to: byType.get("path") || [], maxDistanceM: 5, maxPerSource: 2, type: "barrier-bounds-path", relationships, seen });
@@ -582,7 +590,7 @@ function inferVerticalRelation(a, b) {
 function relationshipConfidence(a, b, distanceM, type) {
   const aConfidence = a.confidence.overall ?? 0.8;
   const bConfidence = b.confidence.overall ?? 0.8;
-  const scale = type === "supports-ride" ? 30 : type === "path-connects-building" ? 12 : 10;
+  const scale = type === "supports-ride" ? 30 : type === "attachment-follows-ride" ? 20 : type === "path-connects-building" ? 12 : 10;
   const proximity = Math.max(0.35, 1 - distanceM / Math.max(scale, 1));
   return round3(Math.min(aConfidence, bConfidence) * proximity);
 }

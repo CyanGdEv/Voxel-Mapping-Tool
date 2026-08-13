@@ -261,13 +261,12 @@ function directProfileFeature(raw, projector, filename, featureIndex) {
       `Ride profile ${featureIndex + 1} must pair null elevation only with evidence=none`);
     const defaultConfidence = confidenceForEvidence(vertexEvidence);
     const suppliedConfidence = numberOrNull(confidenceParts?.[partIndex]?.[vertexIndex]);
-    const banking = numberOrNull(bankingParts?.[partIndex]?.[vertexIndex]);
     flatIndex += 1;
     return {
       x,
       z,
       elevationM: Number.isFinite(coordinate[2]) ? coordinate[2] : null,
-      bankingDeg: banking,
+      bankingDeg: null,
       evidence: vertexEvidence,
       confidence: clamp(suppliedConfidence ?? numberOrNull(properties.confidence) ?? defaultConfidence, 0, 1),
       sourceRef: properties.source_url || path.basename(filename)
@@ -285,8 +284,9 @@ function directProfileFeature(raw, projector, filename, featureIndex) {
     method: properties.method || evidence,
     parts,
     source,
-    bankingMethod: bankingParts ? "supplied" : "unknown",
-    warnings: bankingParts ? [] : ["No verified banking values were supplied."],
+    warnings: bankingParts
+      ? ["Supplied banking values were ignored because ride tracks render as a one-block centreline."]
+      : [],
     validation: properties.validation || null
   });
   const twoDimensional = coordinateParts.map((part) => part.map(([lon, lat]) => [lon, lat]));
@@ -552,10 +552,8 @@ function deriveFeatureProfileFromPointCloud({
       license: sourceCatalog.map((source) => source.license).find(Boolean) || null,
       crs: "EPSG:27700"
     },
-    bankingMethod: "unknown",
     warnings: [
       "Automated LiDAR classification can confuse rails with supports, buildings, or vegetation.",
-      "No banking value is claimed unless both rails or an external profile supplies it.",
       ...(verticalCount < sampleCount ? ["Unobserved gaps remain 2D-only unless bounded interpolation was possible."] : [])
     ]
   });
@@ -710,18 +708,22 @@ function interpolateShortGaps(samples, maxGapM) {
   }
 }
 
-function finalizeProfile({ method, parts, source, bankingMethod, warnings = [], validation = null }) {
+function finalizeProfile({ method, parts, source, warnings = [], validation = null }) {
   const samples = parts.flat();
   const vertical = samples.filter((sample) => Number.isFinite(sample.elevationM));
-  const banking = samples.filter((sample) => Number.isFinite(sample.bankingDeg));
+  const ignoredBankingSamples = samples.filter((sample) => Number.isFinite(sample.bankingDeg)).length;
+  for (const sample of samples) sample.bankingDeg = null;
   const evidenceCounts = countBy(samples, (sample) => sample.evidence || "none");
   const verticalCoverage = samples.length ? vertical.length / samples.length : 0;
-  const bankingCoverage = samples.length ? banking.length / samples.length : 0;
   const confidence = vertical.length
     ? vertical.reduce((sum, sample) => sum + (sample.confidence || 0), 0) / vertical.length
     : 0;
   return {
     schemaVersion: 1,
+    representation: "one-block-centreline",
+    widthBlocks: 1,
+    bankingRendered: false,
+    crossTiesRendered: false,
     method,
     source,
     coordinateReference: { horizontal: "local 1 m map grid", elevation: "metres ODN/declared absolute datum" },
@@ -730,15 +732,20 @@ function finalizeProfile({ method, parts, source, bankingMethod, warnings = [], 
     evidenceCounts,
     coverage: {
       vertical: round3(verticalCoverage),
-      banking: round3(bankingCoverage)
+      banking: 0
     },
     confidence: round3(confidence),
     heightRangeM: vertical.length ? {
       min: round3(Math.min(...vertical.map((sample) => sample.elevationM))),
       max: round3(Math.max(...vertical.map((sample) => sample.elevationM)))
     } : null,
-    bankingMethod,
-    warnings,
+    bankingMethod: "not-rendered-one-block-centreline",
+    warnings: [
+      ...warnings,
+      ...(ignoredBankingSamples && !warnings.some((warning) => warning.includes("banking"))
+        ? [`Ignored banking values on ${ignoredBankingSamples} sample(s); the renderer emits only a one-block centreline.`]
+        : [])
+    ],
     validation
   };
 }
@@ -758,21 +765,23 @@ export function summarizeRideProfiles(features, sourceCatalog = []) {
       ? samples.length
       : group.reduce((sum, feature) => sum + localLineStrings(feature.localGeometry).reduce((n, line) => n + line.length, 0), 0);
     const vertical = samples.filter((sample) => Number.isFinite(sample.elevationM));
-    const banking = samples.filter((sample) => Number.isFinite(sample.bankingDeg));
     const evidenceCounts = countBy(samples, (sample) => sample.evidence || "none");
     const profileSources = uniqueObjects(profiles.map((profile) => profile.source));
     const latestEvidenceDate = latestSourceDate(profileSources);
     const verticalCoverage = totalPlanSamples ? vertical.length / totalPlanSamples : 0;
-    const bankingCoverage = totalPlanSamples ? banking.length / totalPlanSamples : 0;
     return {
       name: group[0].name || null,
       key,
       featureIds: group.map((feature) => feature.id),
+      representation: "one-block-centreline",
+      widthBlocks: 1,
+      bankingRendered: false,
+      crossTiesRendered: false,
       status: verticalCoverage >= 0.999
-        ? bankingCoverage >= 0.999 ? "full-3d-with-banking" : "full-3d-elevation"
-        : verticalCoverage > 0 ? "partial-3d" : "2d-only",
+        ? "full-3d-centreline"
+        : verticalCoverage > 0 ? "partial-3d-centreline" : "2d-centreline",
       verticalCoverage: round3(verticalCoverage),
-      bankingCoverage: round3(bankingCoverage),
+      bankingCoverage: 0,
       confidence: vertical.length
         ? round3(vertical.reduce((sum, sample) => sum + (sample.confidence || 0), 0) / vertical.length)
         : 0,
@@ -788,18 +797,23 @@ export function summarizeRideProfiles(features, sourceCatalog = []) {
   }).sort((a, b) => String(a.name || a.key).localeCompare(String(b.name || b.key)));
   const profiledFeatures = tracks.filter((feature) => feature.rideProfile);
   const verticalCoverage = weightedProfileCoverage(tracks, "vertical");
-  const bankingCoverage = weightedProfileCoverage(tracks, "banking");
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     legend: RIDE_EVIDENCE_LEGEND,
     sourceCatalog,
+    representation: {
+      track: "one-block-centreline",
+      widthBlocks: 1,
+      bankingRendered: false,
+      crossTiesRendered: false
+    },
     totals: {
       trackFeatures: tracks.length,
       profiledTrackFeatures: profiledFeatures.length,
       namedRides: rides.filter((ride) => ride.name).length,
       verticalCoverage: round3(verticalCoverage),
-      bankingCoverage: round3(bankingCoverage)
+      bankingCoverage: 0
     },
     rides,
     profiles: profiledFeatures.map((feature) => ({

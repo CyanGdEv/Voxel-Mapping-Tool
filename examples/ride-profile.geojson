@@ -17,7 +17,6 @@
           "planning-verified"
         ],
         "confidence_by_vertex": [0.94, 0.94, 0.72, 0.94],
-        "banking_deg": [0, 12.5, null, -8],
         "source_name": "Example approved planning drawing",
         "source_url": "https://example.gov/planning/drawing-001",
         "checked_at": "2026-08-02",

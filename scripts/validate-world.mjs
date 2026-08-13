@@ -115,6 +115,16 @@ for (const required of ["minecraft:standing_sign", "minecraft:yellow_concrete"])
   assert.ok(paletteNames.has(required), `world is missing ${required}`);
 }
 const rideOutput = manifest.rideOutput || {};
+assert.equal(rideOutput.representation, "one-block-centreline",
+  "ride output must use the one-block centreline contract");
+assert.equal(rideOutput.trackWidthBlocks, 1, "ride track output must be one block wide");
+assert.equal(rideOutput.bankingRendered, false, "ride output must not render banking");
+assert.equal(rideOutput.crossTiesRendered, false, "ride output must not render cross ties");
+assert.equal((rideOutput.attachmentsRendered || 0) + (rideOutput.attachmentsWithheld || 0),
+  rideOutput.attachmentFeatures || 0, "ride attachment accounting is inconsistent");
+if (rideOutput.attachmentsRendered) {
+  assert.ok(rideOutput.attachmentBlocks > 0, "rendered ride attachments have no emitted blocks");
+}
 assert.ok((rideOutput.tunnelTrackBlocks || 0) >= (rideOutput.inferredTunnelTrackBlocks || 0),
   "inferred tunnel blocks exceed total tunnel blocks");
 if (rideOutput.tunnelExcavatedBlocks) {
@@ -127,7 +137,7 @@ if (rideOutput.tunnelExcavatedBlocks) {
 if (rideOutput.supportFrames) {
   assert.ok(paletteNames.has("minecraft:iron_bars"), "ride support output is missing iron bars");
   assert.ok(rideOutput.supportBlocks > 0, "ride support frames have no emitted blocks");
-  assert.ok(rideOutput.supportFootings > 0, "ride support frames have no inferred-evidence footings");
+  assert.ok(rideOutput.supportFootings > 0, "ride support frames have no emitted footings");
 }
 
 const informationSigns = signEntities.filter((entity) => !labelCoordinates.has(coordinateKey(
@@ -136,11 +146,11 @@ const informationSigns = signEntities.filter((entity) => !labelCoordinates.has(c
 const informationTexts = informationSigns.map((entity) => entity.FrontText.value.Text.value);
 assert.equal(informationSigns.length,
   manifest.signPlacement.mapEvidenceBoards + manifest.signPlacement.rideEvidenceBoards);
-for (const title of ["VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE STRUCTURES", "NOT LIVE PARK INFO"]) {
+for (const title of ["VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE GEOMETRY", "NOT LIVE PARK INFO"]) {
   assert.ok(informationTexts.some((text) => text.startsWith(title)), `missing player evidence board: ${title}`);
 }
 const rideInformationTexts = informationTexts.filter((text) => ![
-  "VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE STRUCTURES", "NOT LIVE PARK INFO"
+  "VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE GEOMETRY", "NOT LIVE PARK INFO"
 ].some((title) => text.startsWith(title)));
 const datedRideSigns = rideInformationTexts.filter((text) => /\bSrc:\d{4}\b/.test(text));
 const malformedSourceDates = rideInformationTexts.filter((text) => text.includes("Src:") &&
@@ -183,10 +193,18 @@ const report = {
     rideEvidenceBoards: manifest.signPlacement.rideEvidenceBoards,
     sourceDatedRideSigns: datedRideSigns.length,
     undatedRideSigns: rideInformationTexts.length - datedRideSigns.length,
-    requiredBoardTitles: ["VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE STRUCTURES", "NOT LIVE PARK INFO"],
+    requiredBoardTitles: ["VOXEL MAPPING TOOL", "TRACK COLOURS", "MORE TRACK COLOURS", "PATH SURFACES", "TERRAIN DETAIL", "RIDE GEOMETRY", "NOT LIVE PARK INFO"],
     status: "passed"
   },
   rideStructures: {
+    representation: rideOutput.representation,
+    trackWidthBlocks: rideOutput.trackWidthBlocks,
+    bankingRendered: rideOutput.bankingRendered,
+    crossTiesRendered: rideOutput.crossTiesRendered,
+    attachmentFeatures: rideOutput.attachmentFeatures || 0,
+    attachmentsRendered: rideOutput.attachmentsRendered || 0,
+    attachmentsWithheld: rideOutput.attachmentsWithheld || 0,
+    attachmentBlocks: rideOutput.attachmentBlocks || 0,
     terrainMode: rideOutput.terrainMode || "off",
     explicitTunnelFeatures: rideOutput.explicitTunnelFeatures || 0,
     terrainDetectedTunnelFeatures: rideOutput.terrainDetectedTunnelFeatures || 0,

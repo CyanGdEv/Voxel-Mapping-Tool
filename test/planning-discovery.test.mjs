@@ -498,6 +498,30 @@ test("automatic world eligibility requires an accepted decision plus as-built/cu
   assert.equal(proposedOnly.worldEligible, false);
 });
 
+test("planning labels distinguish detected ride attachments from generic site features", () => {
+  const cases = new Map([
+    ["Existing left-hand coaster catwalk 1.2m wide", ["ride-catwalk", "catwalk", "track-relative", "left"]],
+    ["Emergency ride access stairs", ["ride-evacuation-stair", "evacuation_stair", "terrain-following", null]],
+    ["Track maintenance platform", ["ride-maintenance-platform", "maintenance_platform", "track-relative", null]],
+    ["Station boarding platform", ["ride-station-platform", "station_platform", "track-relative", null]],
+    ["Safety handrail to ride platform", ["ride-handrail", "handrail", "track-relative", null]],
+    ["Roller coaster perimeter fence", ["ride-fence", "fence", "terrain-following", null]],
+    ["Ride maintenance access path", ["ride-access-path", "access_path", "terrain-following", null]]
+  ]);
+  for (const [label, expected] of cases) {
+    const semantic = classifyComprehensivePlanningLabel(label);
+    assert.equal(semantic.className, "ride_attachment", label);
+    assert.deepEqual([
+      semantic.featureClass,
+      semantic.attachmentType,
+      semantic.attachmentVerticalMode,
+      semantic.attachmentSide
+    ], expected, label);
+  }
+  assert.equal(classifyComprehensivePlanningLabel("Permanent perimeter fence").className, "fence");
+  assert.equal(classifyComprehensivePlanningLabel("Pedestrian access path").className, "path");
+});
+
 function anchor(text, cx, cy) {
   const semantic = classifyComprehensivePlanningLabel(text);
   assert.ok(semantic, `fixture text must classify: ${text}`);
