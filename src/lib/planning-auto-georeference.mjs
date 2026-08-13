@@ -261,7 +261,7 @@ function shapeGeometry(shape, mapper) {
 
 function semanticKind(semantic) {
   const mapping = {
-    ride: "ride_track", ride_support: "ride_support", building: "building", path: "path",
+    ride: "ride_track", ride_support: "ride_support", ride_attachment: "ride_attachment", building: "building", path: "path",
     bridge: "path", tunnel: "path", wall: "barrier", fence: "barrier", water: "water",
     vegetation: "vegetation", rock: "terrain_detail", terrain: "terrain_detail"
   };

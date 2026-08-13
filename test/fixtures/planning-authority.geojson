@@ -74,6 +74,25 @@
     {
       "type": "Feature",
       "properties": {
+        "id": "planning:coaster-catwalk",
+        "kind": "ride_attachment",
+        "planning_feature_class": "ride-catwalk",
+        "ride_attachment": "catwalk",
+        "ride_attachment_vertical_mode": "track-relative",
+        "ride_ref": "planning:coaster",
+        "elevation_m": 6,
+        "width": 1,
+        "material": "steel",
+        "planning_authority": true,
+        "planning_reference": "APP-001",
+        "application_status": "implemented",
+        "verified": true
+      },
+      "geometry": { "type": "LineString", "coordinates": [[-0.00117,51.00091],[-0.00059,51.00067],[0.00058,51.00092]] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
         "id": "planning:support-1",
         "kind": "ride_support",
         "man_made": "ride_support",

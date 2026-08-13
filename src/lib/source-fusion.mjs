@@ -10,7 +10,7 @@ const PEDESTRIAN_CLASSES = new Set([
 ]);
 const SUPPORTED_PUBLIC_KINDS = new Set([
   "path", "road", "building", "structure", "surface", "water", "vegetation",
-  "terrain_detail", "ride_track", "ride_support", "rail", "barrier", "attraction",
+  "terrain_detail", "ride_track", "ride_support", "ride_attachment", "rail", "barrier", "attraction",
   "amenity", "detail", "park_boundary"
 ]);
 
@@ -350,6 +350,9 @@ function classifyPortable(properties, geometry) {
   if (properties.kind) return { kind: String(properties.kind), subtype: properties.subtype || null };
   if (properties.roller_coaster === "track") return { kind: "ride_track", subtype: "coaster" };
   if (properties.roller_coaster === "support") return { kind: "ride_support", subtype: "support" };
+  if (properties.man_made === "ride_attachment" || properties.ride_attachment) {
+    return { kind: "ride_attachment", subtype: properties.ride_attachment || "ride-attachment" };
+  }
   if (properties.building) return { kind: "building", subtype: properties.building };
   if (["rock", "stone", "boulder", "cliff"].includes(properties.natural)) {
     return { kind: "terrain_detail", subtype: properties.natural };

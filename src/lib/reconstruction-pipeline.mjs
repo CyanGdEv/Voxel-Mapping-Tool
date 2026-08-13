@@ -9,6 +9,7 @@ import { solveParkVerticalEvidence, validateVerticalResolution } from "./vertica
 import { reconstructBuildingRoofs, validateBuildingReconstructions } from "./building-roof-reconstruction.mjs";
 import { solveRideVerticalProfiles, validateRideVerticalProfiles } from "./ride-vertical-profile.mjs";
 import { buildRide3dGeometry, validateRide3dGeometry } from "./ride-3d-geometry.mjs";
+import { reconstructRideAttachments, validateRideAttachmentReconstructions } from "./ride-attachment-reconstruction.mjs";
 import { classifyRideTerrainInteractions, validateRideTerrainInteractions } from "./ride-terrain-interaction.mjs";
 import { reconstructRideSupports, validateRideSupportReconstructions } from "./ride-support-reconstruction.mjs";
 import { reconstructVegetation, validateVegetationReconstructions } from "./vegetation-reconstruction.mjs";
@@ -44,6 +45,9 @@ export function reconstructPark({ parkName, map, sources, accuracy, options = {}
   diagnostics.rides3d = buildRide3dGeometry(graph, options);
   validateRide3dGeometry(graph);
 
+  diagnostics.rideAttachments = reconstructRideAttachments(graph, options);
+  validateRideAttachmentReconstructions(graph);
+
   diagnostics.rideTerrain = classifyRideTerrainInteractions(graph, sources, options);
   validateRideTerrainInteractions(graph);
 
@@ -76,6 +80,7 @@ function projectReconstructionToCompilerFeatures(graph) {
       buildingStatus: node.buildingReconstruction?.status || null,
       ride3dStatus: node.geometry3d?.status || null,
       supportStatus: node.supportReconstruction?.status || null,
+      rideAttachmentStatus: node.rideAttachmentReconstruction?.status || null,
       authority: "planning-reconstruction-graph"
     };
     feature.vertical ||= {};
@@ -110,6 +115,10 @@ function projectReconstructionToCompilerFeatures(graph) {
       const resolved = samples.filter((sample) => Number.isFinite(sample.elevationM));
       feature.rideProfile = {
         schemaVersion: 1,
+        representation: "one-block-centreline",
+        widthBlocks: 1,
+        bankingRendered: false,
+        crossTiesRendered: false,
         method: "planning-elevation-anchors",
         source: {
           provider: feature.source?.provider || "Planning authority",
@@ -132,8 +141,8 @@ function projectReconstructionToCompilerFeatures(graph) {
           min: Math.min(...resolved.map((sample) => sample.elevationM)),
           max: Math.max(...resolved.map((sample) => sample.elevationM))
         } : null,
-        bankingMethod: "unknown",
-        warnings: ["No verified banking values were supplied."],
+        bankingMethod: "not-rendered-one-block-centreline",
+        warnings: ["Banking and cross ties are outside the one-block centreline representation."],
         validation: { policy: geometry3d.policy, graphNode: node.id }
       };
       feature.verification ||= {};
@@ -148,6 +157,10 @@ function projectReconstructionToCompilerFeatures(graph) {
         feature.vertical.heightM = node.supportReconstruction.verticalHeightM;
         feature.vertical.explicit = true;
       }
+    }
+
+    if (node.rideAttachmentReconstruction) {
+      feature.rideAttachmentReconstruction = node.rideAttachmentReconstruction;
     }
   }
 }

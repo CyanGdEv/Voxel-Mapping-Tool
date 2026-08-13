@@ -14,6 +14,7 @@ export function assessAccuracy(map, sources, options = {}) {
   const counts = countBy(features, (feature) => feature.kind);
   const buildings = features.filter((feature) => feature.kind === "building");
   const tracks = features.filter((feature) => feature.kind === "ride_track");
+  const rideAttachments = features.filter((feature) => feature.kind === "ride_attachment");
   const attractions = features.filter((feature) => feature.kind === "attraction");
   const paths = features.filter((feature) => ["path", "road"].includes(feature.kind));
   const fidelity = map.fidelity || {};
@@ -30,10 +31,8 @@ export function assessAccuracy(map, sources, options = {}) {
     !String(feature.vertical.heightSource || "").endsWith("dsm-minus-dtm"));
   const profiledTracks = tracks.filter((feature) => feature.rideProfile?.coverage?.vertical > 0);
   const fullElevationTracks = tracks.filter((feature) => feature.rideProfile?.coverage?.vertical >= 0.999);
-  const bankedTracks = tracks.filter((feature) => feature.rideProfile?.coverage?.banking > 0);
-  const fullBankingTracks = tracks.filter((feature) => feature.rideProfile?.coverage?.banking >= 0.999);
   const rideVerticalCoverage = clamp(map.rideProfiles?.totals?.verticalCoverage || 0);
-  const rideBankingCoverage = clamp(map.rideProfiles?.totals?.bankingCoverage || 0);
+  const resolvedRideAttachments = rideAttachments.filter((feature) => feature.rideAttachmentReconstruction?.status === "resolved");
   const rideEvidenceCounts = aggregateRideEvidence(tracks);
   const explicitTunnelTracks = tracks.filter(hasRideTunnelSemantics);
   const tunnelProfileGaps = explicitTunnelTracks.reduce((sum, feature) => sum +
@@ -54,7 +53,7 @@ export function assessAccuracy(map, sources, options = {}) {
   );
   const rides = clamp(
     (attractions.length ? 0.2 : 0) + (tracks.length ? 0.3 : 0) +
-    0.35 * rideVerticalCoverage + 0.15 * rideBankingCoverage
+    0.5 * rideVerticalCoverage
   );
   const structures = buildings.length
     ? clamp(0.45 + 0.55 * (explicitBuildings.length / buildings.length))
@@ -77,9 +76,6 @@ export function assessAccuracy(map, sources, options = {}) {
   if (!tracks.length) gaps.push({ severity: "high", code: "RIDE_TRACKS_ABSENT", message: "No roller-coaster track centreline was found in public map data." });
   else if (!rideVerticalCoverage) gaps.push({ severity: "critical", code: "RIDE_VERTICAL_GEOMETRY_ABSENT", message: "Ride tracks have public plan geometry but no measured or verified elevation profile." });
   else if (rideVerticalCoverage < 0.999) gaps.push({ severity: "critical", code: "RIDE_VERTICAL_GEOMETRY_PARTIAL", message: `Measured/verified ride elevation covers ${(rideVerticalCoverage * 100).toFixed(1)}% of mapped track length; remaining sections stay visibly 2D-only except explicitly tunnel-tagged gaps may use disclosed terrain-constrained inference when enabled.` });
-  if (tracks.length && rideBankingCoverage < 0.999) gaps.push({ severity: "critical", code: "RIDE_BANKING_GEOMETRY_PARTIAL", message: rideBankingCoverage
-    ? `Verified banking covers ${(rideBankingCoverage * 100).toFixed(1)}% of mapped track length.`
-    : "No verified ride banking/roll profile is available; the compiler does not infer banking in verified mode." });
   const interpolatedRideSamples = (rideEvidenceCounts.interpolated || 0) + (rideEvidenceCounts["interpolated-lidar"] || 0);
   if (interpolatedRideSamples) gaps.push({ severity: "medium", code: "RIDE_PROFILE_INTERPOLATED", message: `${interpolatedRideSamples} ride-profile sample(s) are explicitly bounded interpolation rather than direct observations.` });
   if (rideEvidenceCounts.inferred) gaps.push({ severity: "high", code: "RIDE_PROFILE_INFERRED", message: `${rideEvidenceCounts.inferred} ride-profile sample(s) are inferred rather than measured or verified.` });
@@ -91,10 +87,9 @@ export function assessAccuracy(map, sources, options = {}) {
     severity: "critical", code: "RIDE_TUNNEL_VERTICAL_PARTIAL",
     message: `${explicitTunnelTracks.length} mapped tunnel feature(s) contain ${tunnelProfileGaps} hidden profile sample gap(s); evidence mode excavates only height-evidenced portions.`
   });
-  if (tracks.some((feature) => feature.rideProfile?.coverage?.vertical > 0) &&
-    (options.rideTerrainMode || "inferred") === "inferred") gaps.push({
-    severity: "high", code: "RIDE_SUPPORT_LAYOUT_INFERRED",
-    message: `Elevated supports use a disclosed ${options.rideSupportSpacingM || 6} m spacing prior and DTM ground anchors unless mapped/surveyed support evidence is supplied.`
+  if (resolvedRideAttachments.length < rideAttachments.length) gaps.push({
+    severity: "critical", code: "RIDE_ATTACHMENTS_WITHHELD",
+    message: `${rideAttachments.length - resolvedRideAttachments.length} of ${rideAttachments.length} detected ride attachment feature(s) lack enough vertical/ride evidence to compile without fabrication.`
   });
   if (misalignedProfiles.length) gaps.push({
     severity: "critical", code: "RIDE_PLAN_PROFILE_MISALIGNED",
@@ -190,7 +185,7 @@ export function assessAccuracy(map, sources, options = {}) {
     "BOUNDARY_UNVERIFIED",
     "RIDE_VERTICAL_GEOMETRY_ABSENT",
     "RIDE_VERTICAL_GEOMETRY_PARTIAL",
-    "RIDE_BANKING_GEOMETRY_PARTIAL",
+    "RIDE_ATTACHMENTS_WITHHELD",
     "RIDE_PLAN_PROFILE_MISALIGNED",
     "BRIDGE_VERTICAL_GEOMETRY_PARTIAL",
     "TERRAIN_NOT_SURVEY_GRADE",
@@ -223,10 +218,16 @@ export function assessAccuracy(map, sources, options = {}) {
       rideTracks: tracks.length,
       rideTracksWithVerticalEvidence: profiledTracks.length,
       rideTracksWithFullElevation: fullElevationTracks.length,
-      rideTracksWithBankingEvidence: bankedTracks.length,
-      rideTracksWithFullBanking: fullBankingTracks.length,
+      rideTracksWithBankingEvidence: 0,
+      rideTracksWithFullBanking: 0,
       rideVerticalCoverage: round(rideVerticalCoverage),
-      rideBankingCoverage: round(rideBankingCoverage),
+      rideBankingCoverage: 0,
+      rideTrackRepresentation: "one-block-centreline",
+      rideTrackWidthBlocks: 1,
+      rideBankingRendered: false,
+      rideCrossTiesRendered: false,
+      rideAttachments: rideAttachments.length,
+      rideAttachmentsResolved: resolvedRideAttachments.length,
       rideEvidenceCounts,
       ridePlanProfilesNeedingReview: misalignedProfiles.length,
       attractions: attractions.length,

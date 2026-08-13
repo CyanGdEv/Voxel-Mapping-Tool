@@ -58,7 +58,9 @@ Common:
 - `material`, `surface_material`, `surface:pattern`
 - `planning_feature_class`, `planning_feature_state`
 
-Kinds include `park_boundary`, `path`, `road`, `building`, `structure`, `ride_track`, `ride_support`, `water`, `vegetation`, `barrier`, `surface`, `terrain_detail` and `detail`.
+Kinds include `park_boundary`, `path`, `road`, `building`, `structure`, `ride_track`, `ride_support`, `ride_attachment`, `water`, `vegetation`, `barrier`, `surface`, `terrain_detail` and `detail`.
+
+Ride tracks are always rendered as a one-block-wide 3D centreline, without banking or cross ties. Use a separate `ride_attachment` line or polygon for detected `catwalk`, `evacuation_stair`, `maintenance_platform`, `station_platform`, `handrail`, `fence`, or `access_path` geometry. Set `ride_attachment_vertical_mode` to `track-relative` or `terrain-following`, or provide `elevation_m`; geometry is never offset, mirrored, or generated from the track.
 
 Use `planning_feature_class` values such as `ride-elevation`, `building-level`, `water-level` or `terrain-level` for evidence-only level observations. Use `planning_exclude_from_world: true` for construction/annotation geometry. Temporary red construction fencing is also rejected automatically.
 

@@ -89,6 +89,7 @@ test("planning-only build removes every OSM world feature and temporary construc
   const geojson = JSON.parse(await readFile(result.paths.geojson, "utf8"));
   const labels = JSON.parse(await readFile(result.paths.buildingLabels, "utf8"));
   const palette = JSON.parse(await readFile(result.paths.blockPalette, "utf8"));
+  const evidence = JSON.parse(await readFile(result.paths.evidence, "utf8"));
 
   assert.equal(authority.mode, "planning-only");
   assert.equal(authority.world.zeroOsmWorldFeatures, true);
@@ -100,6 +101,12 @@ test("planning-only build removes every OSM world feature and temporary construc
   assert.ok(palette.emittedBlocks.some((block) => block.endsWith("_slab")));
   assert.ok(palette.emittedBlocks.includes("minecraft:sandstone_wall"));
   assert.ok(palette.emittedBlocks.includes("minecraft:oak_trapdoor"));
+  assert.equal(evidence.compilation.meta.verticalStats.rideAttachmentFeatures, 1);
+  assert.equal(evidence.compilation.meta.verticalStats.rideAttachmentRendered, 1);
+  assert.equal(evidence.compilation.meta.verticalStats.rideAttachmentWithheld, 0);
+  assert.ok(evidence.compilation.meta.verticalStats.rideAttachmentBlocks > 0);
+  assert.equal(evidence.compilation.meta.verticalStats.rideAttachmentTypes.catwalk, 1);
+  assert.ok(palette.emittedBlocks.includes("minecraft:iron_block"));
   assert.equal(result.stats.worldValidation, "passed");
 });
 

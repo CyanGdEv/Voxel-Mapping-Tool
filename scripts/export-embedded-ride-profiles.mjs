@@ -21,23 +21,18 @@ for (const sourceFeature of map.features || []) {
   const coordinateParts = [];
   const evidenceParts = [];
   const confidenceParts = [];
-  const bankingParts = [];
-  let hasBanking = false;
   for (const part of profile.parts) {
-    const coordinates = [], evidenceValues = [], confidenceValues = [], bankingValues = [];
+    const coordinates = [], evidenceValues = [], confidenceValues = [];
     for (const sample of part) {
       const [lon, lat] = projector.inverse([sample.x, sample.z]);
       coordinates.push([lon, lat, Number.isFinite(sample.elevationM) ? sample.elevationM : null]);
       evidenceValues.push(Number.isFinite(sample.elevationM) ? sample.evidence || "inferred" : "none");
       confidenceValues.push(Number.isFinite(sample.confidence) ? sample.confidence : 0);
-      bankingValues.push(Number.isFinite(sample.bankingDeg) ? sample.bankingDeg : null);
-      if (Number.isFinite(sample.bankingDeg)) hasBanking = true;
     }
     if (coordinates.length < 2) continue;
     coordinateParts.push(coordinates);
     evidenceParts.push(evidenceValues);
     confidenceParts.push(confidenceValues);
-    bankingParts.push(bankingValues);
   }
   if (!coordinateParts.length) continue;
   const source = profile.source || {};
@@ -66,7 +61,6 @@ for (const sourceFeature of map.features || []) {
       originalCoverage: profile.coverage || null
     }
   };
-  if (hasBanking) properties.banking_deg = coordinateParts.length === 1 ? bankingParts[0] : bankingParts;
   features.push({
     type: "Feature",
     properties,

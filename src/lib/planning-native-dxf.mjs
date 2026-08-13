@@ -209,7 +209,7 @@ function feature({ geometry, semantic, role, confidence, application, document, 
     source: "official-planning-native-dxf"
   } };
 }
-function semanticKind(semantic) { return ({ ride: "ride_track", ride_support: "ride_support", building: "building", path: "path", bridge: "path", tunnel: "path", wall: "barrier", fence: "barrier", water: "water", vegetation: "vegetation", rock: "terrain_detail", terrain: "terrain_detail" })[semantic.className] || "detail"; }
+function semanticKind(semantic) { return ({ ride: "ride_track", ride_support: "ride_support", ride_attachment: "ride_attachment", building: "building", path: "path", bridge: "path", tunnel: "path", wall: "barrier", fence: "barrier", water: "water", vegetation: "vegetation", rock: "terrain_detail", terrain: "terrain_detail" })[semantic.className] || "detail"; }
 function semanticName(value) { const text = String(value || "").replace(/\s+/g, " ").trim(); return text.length <= 100 ? text : `${text.slice(0, 97)}...`; }
 function empty(status, parsed, location) { return { status, page: 1, confidence: 0, scale: null, location, origin: null, shapes: parsed.shapes.length, associatedShapes: 0, nativeFormat: "dxf", collection: { type: "FeatureCollection", features: [] } }; }
 function pairedCoordinates(entity) { const xs = all(entity, 10).map(Number), ys = all(entity, 20).map(Number); return xs.map((x, index) => ({ x, y: ys[index] })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)); }

@@ -6,7 +6,9 @@ const PHYSICAL_FENCE = /\b(?:permanent\s+)?(?:fence|fencing|railings?|balustrade
 const SITE_BOUNDARY = /\b(?:application|planning|red line|site|ownership|land ownership|development)\s+boundary\b|\b(?:red|blue)\s+line\s+boundary\b/i;
 
 export const COMPREHENSIVE_PLAN_CLASSES = Object.freeze([
-  "ride-track", "ride-elevation", "ride-support", "path", "plaza", "queue",
+  "ride-track", "ride-elevation", "ride-support", "ride-catwalk",
+  "ride-evacuation-stair", "ride-maintenance-platform", "ride-handrail",
+  "ride-fence", "ride-station-platform", "ride-access-path", "path", "plaza", "queue",
   "bridge", "boardwalk", "tunnel", "building", "building-level", "wall",
   "retaining-wall", "sound-screen", "fence", "railing", "water-body",
   "watercourse", "drainage", "water-level", "tree", "tree-canopy",
@@ -39,6 +41,14 @@ export function classifyComprehensivePlanningLabel(value) {
   }
 
   const rideContext = /\b(?:roller\s*coaster|coaster|ride|track|rail|alignment|attraction)\b/.test(text);
+  const rideAttachment = classifyRideAttachment(text);
+  if (rideAttachment) {
+    return semantic("ride_attachment", rideAttachment.featureClass, 987, common, {
+      attachmentType: rideAttachment.attachmentType,
+      attachmentVerticalMode: rideAttachment.verticalMode,
+      attachmentSide: rideAttachment.side
+    });
+  }
   const highLow = /(?:^|\b)(hp|lp|high point|low point)\b/.exec(text);
   if ((rideContext && hasLevel(text)) || (highLow && Number.isFinite(dimensions.levelM))) {
     return semantic("ride", "ride-elevation", 985, common, {
@@ -134,6 +144,10 @@ export function comprehensiveSemanticGeometryRole(semanticValue, closed, shape =
   if (semanticValueSafe.className === "tunnel") return { role: closed ? "site-tunnel-surface-candidate" : "site-tunnel-centerline-candidate", tags };
   if (semanticValueSafe.className === "ride") return { role: closed ? "ride-footprint-candidate" : "ride-centerline-candidate", tags };
   if (semanticValueSafe.className === "ride_support") return { role: closed ? "site-ride-support-footing-candidate" : "site-ride-support-candidate", tags };
+  if (semanticValueSafe.className === "ride_attachment") return {
+    role: closed ? "ride-attachment-surface-candidate" : "ride-attachment-centerline-candidate",
+    tags
+  };
   if (semanticValueSafe.className === "building") return closed ? { role: "site-building-footprint-candidate", tags } : null;
   if (semanticValueSafe.className === "wall") return { role: closed ? "site-wall-footprint-candidate" : "site-wall-candidate", tags };
   if (semanticValueSafe.className === "fence") return { role: closed ? "site-fence-footprint-candidate" : "site-fence-candidate", tags };
@@ -170,6 +184,12 @@ export function comprehensiveSemanticTags(semanticValue) {
   if (semanticValue.className === "tunnel") { tags.highway = "footway"; tags.tunnel = "yes"; tags.layer = -1; tags.location = "underground"; }
   if (semanticValue.className === "ride") tags.roller_coaster = "track";
   if (semanticValue.className === "ride_support") { tags.roller_coaster = "support"; tags.man_made = "support"; }
+  if (semanticValue.className === "ride_attachment") {
+    tags.man_made = "ride_attachment";
+    tags.ride_attachment = semanticValue.attachmentType || semanticValue.featureClass.replace(/^ride-/, "");
+    tags.ride_attachment_vertical_mode = semanticValue.attachmentVerticalMode || "terrain-following";
+    if (semanticValue.attachmentSide) tags.ride_attachment_side = semanticValue.attachmentSide;
+  }
   if (semanticValue.className === "building") tags.building = "yes";
   if (semanticValue.className === "wall") tags.barrier = semanticValue.barrierType || "wall";
   if (semanticValue.className === "fence") tags.barrier = semanticValue.featureClass === "railing" ? "railing" : "fence";
@@ -239,6 +259,35 @@ function semantic(className, featureClass, priority, common, extra = {}) {
   return { className, featureClass, priority, ...common, ...extra };
 }
 
+function classifyRideAttachment(text) {
+  const side = /\bboth\s+sides?\b/.test(text) ? "both"
+    : /\bleft(?:-hand)?\b/.test(text) ? "left"
+      : /\bright(?:-hand)?\b/.test(text) ? "right" : null;
+  if (/\b(?:catwalk|inspection walkway|maintenance walkway|service walkway|evacuation walkway|emergency walkway|track access walkway)\b/.test(text)) {
+    return { featureClass: "ride-catwalk", attachmentType: "catwalk", verticalMode: "track-relative", side };
+  }
+  if (/\b(?:evacuation|emergency|ride|coaster|track|maintenance)\s+(?:access\s+)?(?:stairs?|steps?|stairway|staircase)\b/.test(text)) {
+    return { featureClass: "ride-evacuation-stair", attachmentType: "evacuation_stair", verticalMode: "terrain-following", side };
+  }
+  if ((/\b(?:handrail|hand rail|guardrail|guard rail|balustrade|safety railing)\b/.test(text) &&
+      /\b(?:ride|coaster|track|catwalk|platform|station)\b/.test(text))) {
+    return { featureClass: "ride-handrail", attachmentType: "handrail", verticalMode: "track-relative", side };
+  }
+  if (/\bstation\s+(?:boarding\s+|unloading\s+|ride\s+)?platform\b/.test(text)) {
+    return { featureClass: "ride-station-platform", attachmentType: "station_platform", verticalMode: "track-relative", side };
+  }
+  if (/\b(?:ride|coaster|track|maintenance|inspection|evacuation|rescue)\s+(?:access\s+)?platform\b/.test(text)) {
+    return { featureClass: "ride-maintenance-platform", attachmentType: "maintenance_platform", verticalMode: "track-relative", side };
+  }
+  if ((/\b(?:fence|fencing)\b/.test(text) && /\b(?:ride|coaster|track|attraction)\b/.test(text))) {
+    return { featureClass: "ride-fence", attachmentType: "fence", verticalMode: "terrain-following", side };
+  }
+  if (/\b(?:ride|coaster|track|maintenance|emergency|evacuation)\s+(?:service\s+)?access\s+(?:path|route|way)\b/.test(text)) {
+    return { featureClass: "ride-access-path", attachmentType: "access_path", verticalMode: "terrain-following", side };
+  }
+  return null;
+}
+
 function plannedState(text) {
   if (/\b(?:to be removed|removed|demolished|felled|lost)\b/.test(text)) return "removed";
   if (/\b(?:retained|to remain|protected)\b/.test(text)) return "retained";
@@ -285,6 +334,7 @@ function plannedSurfaceMaterial(text) {
 function geometryCompatibility(semanticValue, shape) {
   if (semanticValue.className === "building" && !shape.closed) return -Infinity;
   if (["tree", "ride-support"].includes(semanticValue.featureClass) && shape.closed && likelySymbol(shape)) return 35;
+  if (semanticValue.className === "ride_attachment") return shape.closed ? 20 : 24;
   if (["path", "bridge", "tunnel", "wall", "fence"].includes(semanticValue.className) && !shape.closed) return 18;
   if (["water", "vegetation", "rock", "building"].includes(semanticValue.className) && shape.closed) return 15;
   if (semanticValue.featureClass === "terrain-contour" && !shape.closed) return 20;

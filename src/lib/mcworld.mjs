@@ -252,6 +252,10 @@ export async function buildBedrockWorld({
       rideOutput: {
         profileSummary: compilation.meta.rideEvidence || null,
         evidenceLegend: compilation.meta.rideEvidenceLegend || null,
+        representation: compilation.meta.verticalStats?.rideTrackRepresentation || "one-block-centreline",
+        trackWidthBlocks: compilation.meta.verticalStats?.rideTrackWidthBlocks ?? 1,
+        bankingRendered: compilation.meta.verticalStats?.rideBankingRendered === true,
+        crossTiesRendered: compilation.meta.verticalStats?.rideCrossTiesRendered === true,
         profiledTrackFeatures: compilation.meta.verticalStats?.profiledRideTracks || 0,
         partialProfileFeatures: compilation.meta.verticalStats?.partialRideProfileTracks || 0,
         profileBlocks: compilation.meta.verticalStats?.rideProfileBlocks || 0,
@@ -269,6 +273,12 @@ export async function buildBedrockWorld({
         supportFrames: compilation.meta.verticalStats?.rideSupportFrames || 0,
         supportBlocks: compilation.meta.verticalStats?.rideSupportBlocks || 0,
         supportFootings: compilation.meta.verticalStats?.rideSupportFootings || 0,
+        attachmentFeatures: compilation.meta.verticalStats?.rideAttachmentFeatures || 0,
+        attachmentsRendered: compilation.meta.verticalStats?.rideAttachmentRendered || 0,
+        attachmentsWithheld: compilation.meta.verticalStats?.rideAttachmentWithheld || 0,
+        attachmentBlocks: compilation.meta.verticalStats?.rideAttachmentBlocks || 0,
+        attachmentTypes: compilation.meta.verticalStats?.rideAttachmentTypes || {},
+        attachmentEvidence: compilation.meta.verticalStats?.rideAttachmentEvidence || [],
         structureEvidence: compilation.meta.verticalStats?.rideStructureEvidence || [],
         playerRideSigns: compilation.meta.verticalStats?.rideInformationSigns || 0
       },

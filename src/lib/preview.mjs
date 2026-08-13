@@ -9,6 +9,7 @@ const STYLE = {
   road: { fill: "none", stroke: "#6c757d", width: 4 },
   ride_track: { fill: "none", stroke: "#e63946", width: 2 },
   ride_support: { fill: "none", stroke: "#8d99ae", width: 1 },
+  ride_attachment: { fill: "none", stroke: "#f59e0b", width: 1.5 },
   attraction: { fill: "#f6bd60", stroke: "#9c6644", width: 1 },
   rail: { fill: "none", stroke: "#343a40", width: 2 },
   barrier: { fill: "none", stroke: "#5f6f52", width: 1 },
@@ -105,7 +106,7 @@ function geometryToPath(geometry) {
 }
 
 function layer(kind) {
-  return ({ park_boundary: 0, surface: 1, water: 2, road: 3, path: 4, building: 5, attraction: 6, ride_support: 7, ride_track: 8, barrier: 9 })[kind] ?? 10;
+  return ({ park_boundary: 0, surface: 1, water: 2, road: 3, path: 4, building: 5, attraction: 6, ride_support: 7, ride_track: 8, ride_attachment: 9, barrier: 10 })[kind] ?? 11;
 }
 
 function escapeXml(value) {

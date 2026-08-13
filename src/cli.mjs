@@ -219,13 +219,11 @@ Direct Bedrock world compiler
   --path-width-mode inferred|source-only
                                     Use disclosed route-class priors when width is absent (default), or 1-block evidence markers
   --ride-terrain-mode inferred|evidence|off
-                                      Terrain-aware ride tunnels and supports
+                                      Terrain-aware ride tunnels; supports/attachments require detected evidence
   --ride-tunnel-width-m 7             Nominal tunnel clearance width
   --ride-tunnel-above-m 4             Clearance above the track centreline
   --ride-tunnel-below-m 2             Clearance below the track centreline
   --ride-tunnel-cover-m 1             Minimum terrain cover for detected tunnels
-  --ride-support-spacing-m 6          Inferred support-frame spacing
-  --ride-support-min-height-m 4       Minimum track height for inferred supports
   --palette realistic|clean        Deterministic textured or literal source palette
   --world-margin 32                 Finished terrain around the park, in blocks
   --max-world-chunks 12000          Direct-world size safety limit

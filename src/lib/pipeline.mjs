@@ -299,6 +299,10 @@ function compactRideEvidence(value) {
       ...entry,
       profile: {
         schemaVersion: profile.schemaVersion,
+        representation: profile.representation,
+        widthBlocks: profile.widthBlocks,
+        bankingRendered: profile.bankingRendered,
+        crossTiesRendered: profile.crossTiesRendered,
         method: profile.method,
         source: profile.source,
         sampleCount: profile.sampleCount,
