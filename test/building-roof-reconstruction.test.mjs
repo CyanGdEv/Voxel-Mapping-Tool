@@ -84,3 +84,26 @@ test("planning top below the resolved base is rejected in favour of valid DSM ev
   });
   assert.equal(diagnostics.rejectedPlanningTops, 1);
 });
+
+test("DSM roof samples below the resolved base stay unresolved instead of creating an inverted building", () => {
+  const node = buildingNode({ baseElevationM: 145, topElevationM: 120 });
+  const graph = graphWith(node);
+  const diagnostics = reconstructBuildingRoofs(graph, {
+    elevation: {
+      dsmSourceKind: "test-dsm",
+      sampleDsmLocal: () => 130
+    }
+  });
+
+  validateBuildingReconstructions(graph);
+  assert.equal(node.buildingReconstruction.status, "partial");
+  assert.equal(node.buildingReconstruction.baseElevationM, 145);
+  assert.equal(node.buildingReconstruction.topElevationM, null);
+  assert.equal(node.buildingReconstruction.heightM, null);
+  assert.equal(node.buildingReconstruction.authority.top, "unresolved");
+  assert.equal(node.buildingReconstruction.roof.form, "unresolved");
+  assert.ok(node.buildingReconstruction.dsmSampleCount > 0);
+  assert.equal(node.buildingReconstruction.validDsmSampleCount, 0);
+  assert.equal(diagnostics.rejectedDsmSamples, node.buildingReconstruction.dsmSampleCount);
+  assert.equal(diagnostics.rejectedPlanningTops, 1);
+});

@@ -21,6 +21,7 @@ export function reconstructBuildingRoofs(graph, sources = null, options = {}) {
     dtmSamples: 0,
     dsmSamples: 0,
     rejectedPlanningTops: 0,
+    rejectedDsmSamples: 0,
     flatRoofs: 0,
     pitchedRoofs: 0,
     complexRoofs: 0,
@@ -84,11 +85,21 @@ function solveBuilding(node, samplers, options, diagnostics) {
   const planningBase = finite(node.vertical?.baseElevationM);
   const planningTop = finite(node.vertical?.topElevationM);
   const base = planningBase ?? robustMedian(dtm.map((s) => s.y)) ?? finite(node.terrainSurface?.dtmElevationM);
-  const dsmTop = percentile(dsm.map((s) => s.y), 0.9) ?? finite(node.terrainSurface?.dsmElevationM);
+  const validDsm = base === null
+    ? dsm
+    : dsm.filter((sample) => sample.y + VERTICAL_EPSILON_M >= base);
+  diagnostics.rejectedDsmSamples += dsm.length - validDsm.length;
+  const terrainDsmTop = finite(node.terrainSurface?.dsmElevationM);
+  const validTerrainDsmTop = terrainDsmTop !== null
+    && (base === null || terrainDsmTop + VERTICAL_EPSILON_M >= base)
+    ? terrainDsmTop
+    : null;
+  if (terrainDsmTop !== null && validTerrainDsmTop === null && dsm.length === 0) diagnostics.rejectedDsmSamples += 1;
+  const dsmTop = percentile(validDsm.map((s) => s.y), 0.9) ?? validTerrainDsmTop;
   const planningTopRejected = planningTop !== null && base !== null && planningTop + VERTICAL_EPSILON_M < base;
   if (planningTopRejected) diagnostics.rejectedPlanningTops += 1;
   const top = planningTopRejected ? dsmTop : (planningTop ?? dsmTop);
-  const roof = inferRoof(dsm, node, options);
+  const roof = inferRoof(validDsm, node, options);
 
   const status = base !== null && top !== null ? "resolved" : (base !== null || top !== null || roof.form !== "unresolved" ? "partial" : "unresolved");
   return {
@@ -102,11 +113,12 @@ function solveBuilding(node, samplers, options, diagnostics) {
     footprintSampleCount: samplePoints.length,
     dtmSampleCount: dtm.length,
     dsmSampleCount: dsm.length,
+    validDsmSampleCount: validDsm.length,
     roof,
     authority: {
       footprint: node.authority?.geometry || null,
       base: planningBase !== null ? "planning-vertical" : dtm.length ? samplers.dtmSource : "unresolved",
-      top: !planningTopRejected && planningTop !== null ? "planning-vertical" : dsm.length ? samplers.dsmSource : "unresolved"
+      top: !planningTopRejected && planningTop !== null ? "planning-vertical" : dsmTop !== null ? samplers.dsmSource : "unresolved"
     },
     rejectedVerticalEvidence: planningTopRejected ? {
       property: "topElevationM",
@@ -176,6 +188,6 @@ function percentile(a,p){const v=a.filter(Number.isFinite).sort((x,y)=>x-y);if(!
 function robustMedian(a){return percentile(a,0.5);}
 function confidenceFromSamples(n,relief,form){let c=Math.min(0.98,0.55+Math.min(n,64)/160);if(form==="complex")c-=0.12;if(relief<0.15)c-=0.05;return round3(Math.max(0.3,c));}
 function normalToRiseDirectionDeg(a,b){const deg=Math.atan2(b,a)*180/Math.PI;return round3((deg+360)%360);}
-function compactBuilding(b){return{buildingId:b.buildingId,status:b.status,baseElevationM:b.baseElevationM,topElevationM:b.topElevationM,heightM:b.heightM,roof:b.roof,footprintSampleCount:b.footprintSampleCount,dtmSampleCount:b.dtmSampleCount,dsmSampleCount:b.dsmSampleCount};}
+function compactBuilding(b){return{buildingId:b.buildingId,status:b.status,baseElevationM:b.baseElevationM,topElevationM:b.topElevationM,heightM:b.heightM,roof:b.roof,footprintSampleCount:b.footprintSampleCount,dtmSampleCount:b.dtmSampleCount,dsmSampleCount:b.dsmSampleCount,validDsmSampleCount:b.validDsmSampleCount};}
 function unresolved(node,reason){return{marker:"TPMAP_PHASE34_BUILDING_ROOF_RECONSTRUCTION_V1",buildingId:node.id,status:"unresolved",reason,baseElevationM:null,topElevationM:null,heightM:null,footprintSampleCount:0,dtmSampleCount:0,dsmSampleCount:0,roof:{form:"unresolved",reason,eaveElevationM:null,ridgeElevationM:null,reliefM:null,ridgeDirectionDeg:null,confidence:0},authority:{footprint:node.authority?.geometry||null,base:"unresolved",top:"unresolved"},rejectedVerticalEvidence:null,osmDerived:false,policy:"planning-footprint-plus-footprint-aware-dtm-dsm-no-generic-extrusion"};}
 function finite(v){if(v===undefined||v===null||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null;} function round3(v){return Math.round(Number(v)*1000)/1000;} function clamp(v,f,min,max){const n=Number(v);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):f;}
