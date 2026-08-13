@@ -74,8 +74,51 @@ jobs:
           path: .tpmap-cache/planning-discovery
           key: planning-discovery-v2-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
+  planning-corpus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore the consolidated planning-document corpus
+        id: planning-corpus-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .tpmap-cache/planning-corpus
+          key: planning-corpus-v1-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          restore-keys: |
+            planning-corpus-v1-${{ runner.os }}-${{ inputs.park }}-
+      - name: Restore the legacy park-wide source cache for one-time corpus migration
+        if: steps.planning-corpus-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v6
+        with:
+          path: .tpmap-cache
+          key: source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          restore-keys: |
+            source-v3-${{ runner.os }}-${{ inputs.park }}-
+      - name: Stage every previously acquired raw planning document
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tpmap-cache/planning-corpus
+          if [ -d .tpmap-cache/planning-documents ]; then
+            cp -a -n .tpmap-cache/planning-documents/. .tpmap-cache/planning-corpus/
+          fi
+          touch .tpmap-cache/planning-corpus/.corpus-ready
+          find .tpmap-cache/planning-corpus -type f -printf '.' | wc -c
+      - name: Upload the reusable raw planning corpus once for all shards
+        uses: actions/upload-artifact@v7
+        with:
+          name: planning-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/planning-corpus
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
   planning-extract:
-    needs: planning-plan
+    needs: [planning-plan, planning-corpus]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -87,6 +130,7 @@ jobs:
       PARK_ID: ${{ inputs.park }}
       TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
       TPMAP_SHARED_CACHE_DIR: .tpmap-cache
+      TPMAP_PLANNING_CORPUS_DIR: .tpmap-cache/planning-corpus
       TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -95,6 +139,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Download the prior park-wide planning corpus
+        uses: actions/download-artifact@v8
+        with:
+          name: planning-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/planning-corpus
       - name: Restore this shard's content-addressed planning cache
         uses: actions/cache/restore@v6
         with:
@@ -113,6 +162,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prepare this shard's raw planning-document delta
+        shell: bash
+        run: |
+          mkdir -p ".tpmap-cache/planning-documents/$PARK_ID"
+          touch ".tpmap-cache/planning-documents/$PARK_ID/.delta-ready"
       - name: Extract planning shard ${{ matrix.shard }} of 20
         run: >-
           node src/cli.mjs prepare-planning
@@ -127,6 +181,15 @@ jobs:
         with:
           name: planning-result-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: .tpmap-cache/prepared-planning/shard-${{ matrix.shard }}.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload this shard's raw planning-document delta
+        uses: actions/upload-artifact@v7
+        with:
+          name: planning-documents-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: .tpmap-cache/planning-documents/${{ inputs.park }}
+          include-hidden-files: true
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
@@ -162,6 +225,17 @@ jobs:
           pattern: planning-result-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: .tpmap-cache/prepared-planning-shards
           merge-multiple: true
+      - name: Restore the input planning corpus
+        uses: actions/download-artifact@v8
+        with:
+          name: planning-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/planning-corpus
+      - name: Consolidate every shard's raw planning-document delta
+        uses: actions/download-artifact@v8
+        with:
+          pattern: planning-documents-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: .tpmap-cache/planning-corpus/${{ inputs.park }}
+          merge-multiple: true
       - name: Validate exact coverage and merge in frozen plan order
         run: >-
           node src/cli.mjs merge-planning
@@ -177,6 +251,12 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
+      - name: Save the consolidated planning-document corpus
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .tpmap-cache/planning-corpus
+          key: planning-corpus-v1-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}-final
 
   generate:
     needs: [quality-gate, planning-merge]

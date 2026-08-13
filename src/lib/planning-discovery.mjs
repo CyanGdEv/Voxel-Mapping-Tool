@@ -1,8 +1,9 @@
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
 import { promisify } from "node:util";
-import { readFile, readdir, rm } from "node:fs/promises";
-import { cachedBinary, cachedJson, ensureDir, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
+import { copyFile, readFile, readdir, rm } from "node:fs/promises";
+import { cachedBinary, cachedJson, ensureDir, exists, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
 import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "./planning-native-vector.mjs";
 import { extractNativePlanningArchive } from "./planning-native-archive.mjs";
@@ -104,7 +105,7 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
   const shardIndex = Number(options.planningShardIndex ?? 0);
   const queue = selectPlanningShard(plan.documentQueue, shardIndex, shardCount);
   const limits = discoveryLimits(options);
-  let processed = 0, acquired = 0, rawDocumentCacheHits = 0, pageResults = 0;
+  let processed = 0, acquired = 0, rawDocumentCacheHits = 0, sharedPlanningCorpusHits = 0, pageResults = 0;
   const failures = [];
   const entries = await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
     let value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
@@ -115,6 +116,7 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
     processed += 1;
     if (value.evidence.acquired) acquired += 1;
     if (value.evidence.cacheHit) rawDocumentCacheHits += 1;
+    if (value.evidence.cacheSource === "shared-planning-corpus") sharedPlanningCorpusHits += 1;
     pageResults += value.evidence.extraction.length;
     failures.push(...value.failures);
     emitProgress(runtime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
@@ -140,7 +142,8 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
   const output = options.out ? await writeJson(path.resolve(options.out), bundle, 0) : null;
   return {
     schemaVersion: 1, parkId: plan.parkId, shardIndex, shardCount,
-    assigned: queue.length, processed, acquired, rawDocumentCacheHits, pageResults, failures, output
+    assigned: queue.length, processed, acquired, rawDocumentCacheHits, sharedPlanningCorpusHits,
+    pageResults, failures, output
   };
 }
 
@@ -617,8 +620,17 @@ async function processPlanningDocument(document, application, profile, options, 
   };
   try {
     const extension = documentExtension(document.url);
+    const documentCacheDir = path.join(runtime.cacheDir, "planning-documents", profile.id);
+    const seededFromCorpus = await seedPlanningDocumentFromCorpus({
+      cacheDir: documentCacheDir,
+      corpusDir: runtime.planningCorpusDir || process.env.TPMAP_PLANNING_CORPUS_DIR,
+      profileId: profile.id,
+      url: document.url,
+      extension,
+      noCache: options.noCache
+    });
     const cached = await cachedBinary({
-      cacheDir: path.join(runtime.cacheDir, "planning-documents", profile.id),
+      cacheDir: documentCacheDir,
       key: document.url,
       noCache: options.noCache,
       extension,
@@ -637,6 +649,9 @@ async function processPlanningDocument(document, application, profile, options, 
     evidence.sha256 = sourceHash;
     evidence.sizeBytes = sizeBytes;
     evidence.cacheHit = cached.cacheHit;
+    evidence.cacheSource = seededFromCorpus
+      ? "shared-planning-corpus"
+      : cached.cacheHit ? "shard-cache" : "network";
   } catch (error) {
     if (sourceFile) await rm(sourceFile, { force: true }).catch(() => {});
     failures.push(failure("official-document", document.url, error, application.reference));
@@ -722,6 +737,31 @@ async function processPlanningDocument(document, application, profile, options, 
   evidence.derivedCollectionsDeclared = features.length ? 1 : 0;
   const processed = { evidence, collection: null, candidateCollection: collection, sourceFile, failures, warnings };
   return deferEligibility ? processed : finalizePlanningDocument(processed, application, document, runtime);
+}
+
+export async function seedPlanningDocumentFromCorpus({
+  cacheDir,
+  corpusDir,
+  profileId,
+  url,
+  extension = ".bin",
+  noCache = false
+}) {
+  if (noCache || !corpusDir || !profileId || !url) return false;
+  const suffix = String(extension).startsWith(".") ? String(extension) : `.${extension}`;
+  const basename = `${sha256(url)}${suffix}`;
+  const target = path.join(path.resolve(cacheDir), basename);
+  if (await exists(target)) return false;
+  const source = path.join(path.resolve(corpusDir), profileId, basename);
+  if (!await exists(source)) return false;
+  await ensureDir(path.dirname(target));
+  try {
+    await copyFile(source, target, fsConstants.COPYFILE_EXCL);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    throw error;
+  }
 }
 
 export async function retryPlanningOperation(operation) {
