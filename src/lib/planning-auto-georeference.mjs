@@ -8,9 +8,13 @@ import {
 } from "./planning-comprehensive-semantics.mjs";
 
 const DEFAULT_DPI = 300;
-const MAX_SHAPES = 12_000;
+const MAX_POLYGON_SHAPES = 12_000;
+const MAX_LINE_SHAPES = 12_000;
 const BNG = "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs";
 const CORROBORATION_MARKER = "TPMAP_PLANNING_CORROBORATION_INPUT_V1";
+const OSM_RIDE_CORROBORATION_DISTANCE_M = 12;
+const OSM_RIDE_CORROBORATION_MIN_SAMPLES = 6;
+const OSM_RIDE_CORROBORATION_MIN_RATIO = 0.5;
 
 export function autoGeoreferencePlanningPage({
   svg,
@@ -39,9 +43,10 @@ export function autoGeoreferencePlanningPage({
   }
 
   const associationRadius = Math.max(24, Math.min(parsed.width, parsed.height) * 0.05);
+  const geometryAnchors = (semantic.anchors || []).filter((anchor) => isLocalGeometryAnchor(anchor, parsed));
   const associated = parsed.shapes.map((shape) => ({
     shape,
-    association: associateComprehensivePlanningLabel(shape, semantic.anchors || [], associationRadius)
+    association: associateComprehensivePlanningLabel(shape, geometryAnchors, associationRadius)
   })).filter((entry) => entry.association?.anchor?.semantic);
   const labelledBoundary = associated.find((entry) => entry.association.anchor.semantic.featureClass === "site-boundary");
   const redBoundaryShape = parsed.shapes.filter((shape) => shape.closed && redStroke(shape.stroke))
@@ -71,6 +76,10 @@ export function autoGeoreferencePlanningPage({
   for (const { shape, association } of associated) {
     if (shape === redBoundaryShape && association.anchor.semantic.featureClass !== "site-boundary") continue;
     const semanticValue = association.anchor.semantic;
+    // The supported ride representation is a one-block centreline. Elevation labels
+    // are emitted separately as points, while closed envelopes/legend glyphs are
+    // evidence rather than track geometry.
+    if (semanticValue.className === "ride" && (semanticValue.featureClass !== "ride-track" || shape.closed)) continue;
     const role = comprehensiveSemanticGeometryRole(semanticValue, shape.closed, shape);
     if (!role || role.excluded || role.evidenceOnly) continue;
     const confidence = clamp(baseConfidence * (0.72 + 0.28 * Number(association.anchor.ocrConfidence || 0.65)), 0, 1);
@@ -152,15 +161,18 @@ export function parsePlanningSvg(svg) {
   const width = Number(viewBox?.[3] || source.match(/<svg\b[^>]*\bwidth=["']([\d.]+)/i)?.[1]);
   const height = Number(viewBox?.[4] || source.match(/<svg\b[^>]*\bheight=["']([\d.]+)/i)?.[1]);
   const shapes = [];
-  let match;
+  let polygonCount = 0, lineCount = 0, match;
   const polygons = /<polygon\b([^>]*)>/gi;
-  while ((match = polygons.exec(source)) && shapes.length < MAX_SHAPES) {
+  while ((match = polygons.exec(source)) && polygonCount < MAX_POLYGON_SHAPES) {
     const attributes = parseAttributes(match[1]);
     const points = parsePoints(attributes.points);
-    if (points.length >= 3) shapes.push({ type: "polygon", closed: true, points, stroke: attributes.stroke || null });
+    if (points.length >= 3) {
+      shapes.push({ type: "polygon", closed: true, points, stroke: attributes.stroke || null });
+      polygonCount += 1;
+    }
   }
   const lines = /<line\b([^>]*)>/gi;
-  while ((match = lines.exec(source)) && shapes.length < MAX_SHAPES) {
+  while ((match = lines.exec(source)) && lineCount < MAX_LINE_SHAPES) {
     const attributes = parseAttributes(match[1]);
     const points = [
       { x: Number(attributes.x1), y: Number(attributes.y1) },
@@ -168,6 +180,7 @@ export function parsePlanningSvg(svg) {
     ];
     if (points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))) {
       shapes.push({ type: "line", closed: false, points, stroke: attributes.stroke || null });
+      lineCount += 1;
     }
   }
   return {
@@ -180,7 +193,8 @@ export function parsePlanningSvg(svg) {
 export function detectPlanningScales(value) {
   const results = [];
   const text = String(value || "");
-  const pattern = /(?:scale\s*(?:at\s*)?|\b)(?:1\s*[:@]\s*)(\d{2,5})(?:\b|\s*at\s*a[0-4])/gi;
+  // UK planning title blocks commonly use 1/200 @ A1 as well as 1:200.
+  const pattern = /(?:scale\s*(?:at\s*)?|\b)(?:1\s*[:@/]\s*)(\d{2,5})(?:\b|\s*at\s*a[0-4])/gi;
   let match;
   while ((match = pattern.exec(text))) {
     const denominator = Number(match[1]);
@@ -226,19 +240,23 @@ export function corroborateAutomaticPlanningCollection(collection, application, 
   }
   const dsmRatio = samples ? structureMatches / samples : 0;
   const dsmCorroborated = samples >= 3 && dsmRatio >= 0.45;
-  const worldEligible = acceptedDecision && (explicitExisting || dsmCorroborated);
+  const osmRide = corroborateRideAgainstOsm(collection, runtime);
+  const worldEligible = acceptedDecision && (explicitExisting || dsmCorroborated || osmRide.corroborated);
   return {
     worldEligible,
     basis: worldEligible
       ? explicitExisting
         ? "The official record describes existing/as-built/implemented work and the drawing passed automatic scale, location and semantic confidence gates."
-        : `The approved official drawing passed automatic georeferencing and ${structureMatches}/${samples} sampled structural locations are independently present in the public DSM.`
+        : dsmCorroborated
+          ? `The approved official drawing passed automatic georeferencing and ${structureMatches}/${samples} sampled structural locations are independently present in the public DSM.`
+          : `The approved official planning-derived ride geometry is independently corroborated by ${osmRide.matches}/${osmRide.samples} registration-only OSM ride samples; OSM geometry is not promoted into the world.`
       : acceptedDecision
-        ? "Approved/proposed geometry was discovered but no automatic current-state/as-built or DSM corroboration reached the promotion threshold."
+        ? "Approved/proposed geometry was discovered but no automatic current-state/as-built, DSM, or registration-only OSM ride corroboration reached the promotion threshold."
         : "The official record is not an accepted/implemented decision.",
     acceptedDecision,
     explicitExisting,
-    dsm: { available: Boolean(samplePairLocal), samples, structureMatches, ratio: round(dsmRatio) }
+    dsm: { available: Boolean(samplePairLocal), samples, structureMatches, ratio: round(dsmRatio) },
+    osmRide
   };
 }
 
@@ -351,6 +369,83 @@ function sampleGeometry(geometry, maxSamples) {
   }
   if (samples.length < maxSamples) samples.push(vertices.at(-1));
   return samples.slice(0, maxSamples);
+}
+
+function isLocalGeometryAnchor(anchor, parsed) {
+  const semantic = anchor?.semantic;
+  if (!semantic) return false;
+  if (semantic.featureClass === "ride-elevation") return false;
+  if (semantic.featureClass !== "ride-track") return true;
+  const text = String(anchor.text || "").toLowerCase();
+  if (/\b(?:legend|key)\b|\bindicated\s+(?:thus|as)\b/.test(text)) return false;
+  const inTitleMargin = Number(anchor.cx) > parsed.width * 0.78 || Number(anchor.cy) > parsed.height * 0.88;
+  const explicitGeometryLabel = /\b(?:track|alignment|running rail|ride footprint|ride layout|attraction layout)\b/.test(text);
+  return !(inTitleMargin && !explicitGeometryLabel);
+}
+
+function corroborateRideAgainstOsm(collection, runtime) {
+  const lines = osmRideLines(runtime?.osm?.data || runtime?.osm);
+  if (!lines.length) {
+    return { available: false, samples: 0, matches: 0, ratio: 0, thresholdM: OSM_RIDE_CORROBORATION_DISTANCE_M, corroborated: false };
+  }
+  const rideFeatures = (collection?.features || []).filter((feature) =>
+    feature?.properties?.kind === "ride_track" && feature.geometry?.type === "LineString");
+  const samples = rideFeatures.flatMap((feature) => sampleGeometry(feature.geometry, 24)).slice(0, 240);
+  let matches = 0;
+  for (const sample of samples) {
+    if (nearestLineDistanceM(sample, lines) <= OSM_RIDE_CORROBORATION_DISTANCE_M) matches += 1;
+  }
+  const ratio = samples.length ? matches / samples.length : 0;
+  return {
+    available: true,
+    samples: samples.length,
+    matches,
+    ratio: round(ratio),
+    thresholdM: OSM_RIDE_CORROBORATION_DISTANCE_M,
+    corroborated: samples.length >= OSM_RIDE_CORROBORATION_MIN_SAMPLES && ratio >= OSM_RIDE_CORROBORATION_MIN_RATIO,
+    policy: "registration/current-state corroboration only; OSM coordinates are never emitted as planning world geometry"
+  };
+}
+
+function osmRideLines(data) {
+  const lines = [];
+  const pushGeometry = (geometry) => {
+    const coordinates = (geometry || [])
+      .map((point) => [Number(point.lon), Number(point.lat)])
+      .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+    if (coordinates.length >= 2) lines.push(coordinates);
+  };
+  for (const element of data?.elements || []) {
+    if (String(element?.tags?.roller_coaster || "").toLowerCase() !== "track") continue;
+    pushGeometry(element.geometry);
+    for (const member of element.members || []) pushGeometry(member.geometry);
+  }
+  return lines;
+}
+
+function nearestLineDistanceM(point, lines) {
+  let best = Infinity;
+  for (const line of lines) {
+    for (let index = 1; index < line.length; index += 1) {
+      best = Math.min(best, pointSegmentDistanceM(point, line[index - 1], line[index]));
+      if (best <= 0.5) return best;
+    }
+  }
+  return best;
+}
+
+function pointSegmentDistanceM(point, start, end) {
+  const latitude = (Number(point[1]) + Number(start[1]) + Number(end[1])) / 3;
+  const lonScale = 111_320 * Math.cos(latitude * Math.PI / 180);
+  const latScale = 111_320;
+  const px = Number(point[0]) * lonScale, py = Number(point[1]) * latScale;
+  const ax = Number(start[0]) * lonScale, ay = Number(start[1]) * latScale;
+  const bx = Number(end[0]) * lonScale, by = Number(end[1]) * latScale;
+  const dx = bx - ax, dy = by - ay;
+  const length2 = dx * dx + dy * dy;
+  if (!length2) return Math.hypot(px - ax, py - ay);
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / length2, 0, 1);
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
 function autoId(application, document, page, index) {
