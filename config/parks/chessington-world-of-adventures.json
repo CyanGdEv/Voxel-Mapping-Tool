@@ -13,7 +13,39 @@
     "siteIdentityTerms": ["Chessington World of Adventures", "Chessington Zoo"],
     "portalType": "idox",
     "searchUrl": "https://publicaccess.kingston.gov.uk/online-applications/search.do?action=simple",
-    "allowedDocumentHosts": ["publicaccess.kingston.gov.uk"]
+    "allowedDocumentHosts": ["publicaccess.kingston.gov.uk"],
+    "seedApplicationUrls": [
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=SMWD1MNHKHG00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=SW4ZMXNHGQQ00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=RC2XIUNHISW00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=T8EBXHNHLVA00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IU8MNHFKD00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUBSNHFKE00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IU5ANHFKB00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUDSNHFKF00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUFSNHFKH00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=T0IOTFNHIOO00"
+    ],
+    "priorityApplicationUrls": [
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=SMWD1MNHKHG00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=SW4ZMXNHGQQ00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=RC2XIUNHISW00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=T8EBXHNHLVA00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IU8MNHFKD00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUBSNHFKE00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IU5ANHFKB00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUDSNHFKF00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=R1IUFSNHFKH00",
+      "https://publicaccess.kingston.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=T0IOTFNHIOO00"
+    ],
+    "documentArchives": [{
+      "provider": "Planning Alerts public archive",
+      "applicationUrlTemplate": "https://planning.org.uk/app/94/{portalKey}/",
+      "allowedDocumentHosts": ["planning.org.uk"],
+      "landingPathPrefix": "/docs/",
+      "rawDocumentBaseUrl": "https://docs.planning.org.uk/",
+      "verifyRawDocuments": true
+    }]
   },
   "defaults": {
     "elevation": "ea-lidar",

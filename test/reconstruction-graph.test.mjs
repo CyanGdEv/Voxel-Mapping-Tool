@@ -35,6 +35,38 @@ test("duplicate upstream feature ids are deterministically disambiguated", () =>
   assert.equal(reconstructionCompilerMap({ ...map, reconstructionGraph: graph }).features.length, 2);
 });
 
+test("relationship ids remain unique when long source ids share the same readable prefix", () => {
+  const commonWaterId = `auto-plan:smd-2022-0556:${"updated-drainage-maintenance-schedule-".repeat(4)}`;
+  const polygon = (minX, minZ, maxX, maxZ) => ({
+    type: "Polygon",
+    coordinates: [[[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ], [minX, minZ]]]
+  });
+  const feature = (id, kind, localGeometry) => ({
+    id,
+    kind,
+    subtype: kind,
+    tags: {},
+    geometry: localGeometry,
+    localGeometry,
+    source: { provider: "Planning authority" }
+  });
+  const map = {
+    features: [
+      feature("bridge-fixture", "bridge", polygon(0, 0, 10, 4)),
+      feature(`${commonWaterId}north`, "water", polygon(1, 1, 4, 3)),
+      feature(`${commonWaterId}south`, "water", polygon(6, 1, 9, 3))
+    ]
+  };
+
+  const graph = buildParkReconstructionGraph({
+    parkName: "Fixture Park", map, options: { planningWorldAuthority: "fixture" }
+  });
+  const crossings = graph.relationships.filter((relation) => relation.type === "bridge-crosses-water");
+  assert.equal(crossings.length, 2);
+  assert.equal(new Set(crossings.map((relation) => relation.id)).size, 2);
+  assert.ok(crossings.every((relation) => /:[a-f0-9]{20}$/.test(relation.id)));
+});
+
 test("ride attachments retain detected geometry and resolve only against nearby 3D ride evidence", () => {
   const source = { provider: "Planning authority", sourceUrl: "https://example.test/plan", sha256: "plan-hash" };
   const vertical = { heightM: null, elevationM: null, groundElevationM: 0 };

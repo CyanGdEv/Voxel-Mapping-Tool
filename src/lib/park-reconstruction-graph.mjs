@@ -3,6 +3,8 @@
 // Minecraft rasterization. Phase 33 is intentionally additive: it records the
 // physical park scene and high-value relationships without changing compilation.
 
+import { createHash } from "node:crypto";
+
 const SCHEMA_VERSION = 1;
 const CELL_SIZE_M = 24;
 const PHYSICAL_KINDS = new Set([
@@ -745,11 +747,14 @@ function compareRelationship(a, b) {
 }
 
 function stablePairId(a, b) {
-  return `${safeId(a)}:${safeId(b)}`;
+  const fullPair = `${String(a)}\0${String(b)}`;
+  const readable = `${safeId(a, 40)}:${safeId(b, 40)}`;
+  const digest = createHash("sha256").update(fullPair).digest("hex").slice(0, 20);
+  return `${readable}:${digest}`;
 }
 
-function safeId(value) {
-  return String(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-").slice(0, 100);
+function safeId(value, maxLength = 100) {
+  return String(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-").slice(0, maxLength);
 }
 
 function truthy(value) {
