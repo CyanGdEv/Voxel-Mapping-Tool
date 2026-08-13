@@ -12,6 +12,7 @@ import {
 } from "../src/lib/planning-auto-georeference.mjs";
 import {
   acquireAutomaticPlanningEvidence,
+  createAutomaticPlanningPlan,
   createPlanningExtractionScheduler,
   discoverPlanningApplications,
   loadPreparedPlanningDocuments,
@@ -20,6 +21,7 @@ import {
   PREPARED_MERGED_MARKER,
   PREPARED_SHARD_MARKER,
   retryPlanningOperation,
+  requireAutomaticPlanningDocuments,
   seedPlanningDocumentFromCorpus,
   selectPlanningShard
 } from "../src/lib/planning-discovery.mjs";
@@ -634,6 +636,95 @@ test("priority archive seeds survive a deliberately small application limit", as
   assert.equal(result.applications.length, 1);
   assert.equal(result.applications[0].sourceUrl, preferred);
   assert.ok(result.applications[0].discoveryScore >= 9_000);
+});
+
+test("a configured public archive recovers council-submitted documents with explicit provenance", async () => {
+  const archiveProfile = {
+    ...profile,
+    planningDiscovery: {
+      ...profile.planningDiscovery,
+      documentArchives: [{
+        provider: "Fixture public planning archive",
+        applicationUrlTemplate: "https://archive.example/app/{portalKey}/",
+        allowedDocumentHosts: ["archive.example"],
+        landingPathPrefix: "/docs/",
+        rawDocumentBaseUrl: "https://files.archive.example/",
+        verifyRawDocuments: true
+      }]
+    }
+  };
+  const plan = await createAutomaticPlanningPlan({
+    parkProfile: archiveProfile,
+    maxPlanningApplications: 1,
+    maxPlanningDocuments: 10
+  }, {
+    bbox: archiveProfile.bbox,
+    cacheDir: "/tmp/not-used",
+    userAgent: "VoxelMappingTool/test",
+    fetchJson: async () => ({
+      type: "FeatureCollection",
+      total: 1,
+      features: [{
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [0, 51.01] },
+        properties: {
+          reference: "25/0042/FUL",
+          address: "Fixture Park FP1 1AA",
+          description: "Existing roller coaster layout and ride structure",
+          app_state: "Permitted",
+          url: "https://planning.example/online-applications/applicationDetails.do?keyVal=ABC42"
+        }
+      }]
+    }),
+    fetchHead: async (url) => url.endsWith("stale.pdf")
+      ? ({ ok: false, status: 404 })
+      : ({ ok: true, status: 200 }),
+    fetchText: async (url) => {
+      if (url.includes("search.do")) return "";
+      if (url === "https://archive.example/app/ABC42/") return `
+        <table><tr><td>21/11/2024</td><td>Existing ride layout drawing</td>
+        <td><a href="https://archive.example/docs/20241121/ABC42/layout.pdf"><i>PDF</i></a></td></tr>
+        <tr><td>21/11/2024</td><td>Removed duplicate</td>
+        <td><a href="https://archive.example/docs/20241121/ABC42/stale.pdf"><i>PDF</i></a></td></tr></table>`;
+      throw new Error("HTTP 502 from official planning register");
+    }
+  });
+
+  assert.equal(plan.documentQueue.length, 1);
+  const { document, application } = plan.documentQueue[0];
+  assert.equal(document.title, "Existing ride layout drawing - PDF");
+  assert.equal(document.url, "https://files.archive.example/20241121/ABC42/layout.pdf");
+  assert.equal(document.retrievalProvider, "Fixture public planning archive");
+  assert.equal(document.retrievalApplicationUrl, "https://archive.example/app/ABC42/");
+  assert.equal(document.archivedDocumentUrl, "https://archive.example/docs/20241121/ABC42/layout.pdf");
+  assert.equal(document.officialApplicationUrl, application.sourceUrl);
+  assert.match(plan.failures.map((item) => item.error).join(" "), /HTTP 502/);
+  assert.ok(plan.failures.some((item) => item.adapter === "archived-planning-document-preflight"));
+  assert.match(plan.warnings.join(" "), /official application provenance was retained/);
+});
+
+test("empty automatic planning plans fail before extraction shards start", () => {
+  assert.throws(() => requireAutomaticPlanningDocuments({ applications: [{ reference: "A" }], documentQueue: [] }),
+    /no retrievable planning documents; refusing to start empty extraction shards/);
+  const usable = { applications: [], documentQueue: [{ document: { id: "one" } }] };
+  assert.equal(requireAutomaticPlanningDocuments(usable), usable);
+});
+
+test("Chessington config prioritizes recoverable official applications and a bounded archive", async () => {
+  const chessington = JSON.parse(await readFile(
+    path.join(repositoryRoot, "config/parks/chessington-world-of-adventures.json"), "utf8"
+  ));
+  assert.ok(chessington.planningDiscovery.priorityApplicationUrls.length >= 10);
+  assert.deepEqual(chessington.planningDiscovery.seedApplicationUrls,
+    chessington.planningDiscovery.priorityApplicationUrls);
+  assert.deepEqual(chessington.planningDiscovery.documentArchives, [{
+    provider: "Planning Alerts public archive",
+    applicationUrlTemplate: "https://planning.org.uk/app/94/{portalKey}/",
+    allowedDocumentHosts: ["planning.org.uk"],
+    landingPathPrefix: "/docs/",
+    rawDocumentBaseUrl: "https://docs.planning.org.uk/",
+    verifyRawDocuments: true
+  }]);
 });
 
 test("planning acquisition automatically invokes discovery when a supported park has no manual manifest", async () => {

@@ -32,6 +32,7 @@ const MAX_PAGES_HARD = 50;
 const MAX_PLANIT_CANDIDATE_SCAN = 600;
 const APPLICATION_CRAWL_CONCURRENCY = 4;
 const DOCUMENT_PROCESS_CONCURRENCY = 4;
+const ARCHIVE_PREFLIGHT_CONCURRENCY = 12;
 const MAX_PLANNING_EXTRACTION_WORKERS = 8;
 export const PREPARED_SHARD_MARKER = "TPMAP_PREPARED_PLANNING_SHARD_V2";
 export const PREPARED_MERGED_MARKER = "TPMAP_PREPARED_PLANNING_MERGED_V1";
@@ -100,6 +101,14 @@ export async function createAutomaticPlanningPlan(options, runtime) {
     failures,
     warnings
   };
+}
+
+export function requireAutomaticPlanningDocuments(plan) {
+  if (Array.isArray(plan?.documentQueue) && plan.documentQueue.length) return plan;
+  const applicationCount = Array.isArray(plan?.applications) ? plan.applications.length : 0;
+  throw new Error(
+    `Automatic planning discovery found ${applicationCount} application(s) but no retrievable planning documents; refusing to start empty extraction shards`
+  );
 }
 
 export async function prepareAutomaticPlanningShard(plan, options, runtime) {
@@ -577,6 +586,12 @@ async function crawlApplicationDocuments(applicationInput, profile, options, run
   } catch (error) {
     failures.push(failure("official-application", application.sourceUrl, error, application.reference));
   }
+  if (!documents.length) {
+    const archived = await crawlConfiguredDocumentArchives(application, profile, options, runtime);
+    documents.push(...archived.documents);
+    failures.push(...archived.failures);
+    warnings.push(...archived.warnings);
+  }
   const expanded = [];
   for (const candidate of uniqueBy(documents, (item) => item.url).slice(0, Math.min(limits.documents * 2, 200))) {
     if (!/(?:documentDetails\.do|DocDetails|DocumentDetails|StdDetails\.aspx)/i.test(candidate.url)) {
@@ -602,13 +617,111 @@ async function crawlApplicationDocuments(applicationInput, profile, options, run
   const ranked = uniqueBy(expanded, (item) => item.url)
     .filter((document) => document.relevant)
     .sort((a, b) => b.score - a.score || a.url.localeCompare(b.url))
-    .slice(0, Math.min(limits.documents, 80))
+    .slice(0, limits.documents)
     .map((document, index) => ({
       ...document,
       id: `${safeId(application.reference)}-${index + 1}-${safeId(document.title || document.role)}`,
       url: document.url
     }));
   return { application, documents: ranked, failures, warnings };
+}
+
+async function crawlConfiguredDocumentArchives(application, profile, options, runtime) {
+  const documents = [], failures = [], warnings = [];
+  const portalKey = applicationPortalKey(application);
+  if (!portalKey) return { documents, failures, warnings };
+  for (const archive of profile.planningDiscovery.documentArchives || []) {
+    let applicationUrl;
+    try {
+      if (!String(archive.applicationUrlTemplate || "").includes("{portalKey}")) {
+        throw new Error("archive applicationUrlTemplate must contain {portalKey}");
+      }
+      applicationUrl = archive.applicationUrlTemplate.replace("{portalKey}", encodeURIComponent(portalKey));
+      const applicationHtml = await fetchTextCached(applicationUrl, options, runtime, "configured-document-archives");
+      const links = extractDocumentLinks(applicationHtml, applicationUrl, archive.allowedDocumentHosts || []);
+      const candidates = [];
+      for (const link of links) {
+        const rawUrl = configuredArchiveRawUrl(link.url, archive);
+        if (!rawUrl) continue;
+        candidates.push({
+          ...link,
+          url: rawUrl,
+          retrievalProvider: archive.provider,
+          retrievalApplicationUrl: applicationUrl,
+          officialApplicationUrl: application.sourceUrl,
+          archivedDocumentUrl: link.url
+        });
+      }
+      const recovered = archive.verifyRawDocuments
+        ? (await mapLimit(candidates, ARCHIVE_PREFLIGHT_CONCURRENCY, async (document) => {
+            const available = await archiveDocumentAvailable(document.url, runtime);
+            if (!available) failures.push(failure(
+              "archived-planning-document-preflight",
+              document.url,
+              new Error("archive listing points to an unavailable raw planning document"),
+              application.reference
+            ));
+            return available ? document : null;
+          })).filter(Boolean)
+        : candidates;
+      documents.push(...recovered);
+      if (recovered.length) warnings.push(
+        `${archive.provider} recovered ${recovered.length} council-submitted planning document(s) for ${application.reference || portalKey}; official application provenance was retained.`
+      );
+    } catch (error) {
+      failures.push(failure("configured-planning-document-archive", applicationUrl || archive.applicationUrlTemplate, error, application.reference));
+    }
+  }
+  return { documents: uniqueBy(documents, (item) => item.url), failures, warnings };
+}
+
+async function archiveDocumentAvailable(url, runtime) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = runtime.fetchHead
+        ? await runtime.fetchHead(url, { headers: requestHeaders(runtime.userAgent, "application/pdf,image/*,*/*") })
+        : await fetch(url, {
+            method: "HEAD",
+            redirect: "follow",
+            headers: requestHeaders(runtime.userAgent, "application/pdf,image/*,*/*"),
+            signal: AbortSignal.timeout(15_000)
+          });
+      const status = Number(response?.status ?? response);
+      if (response?.ok === true || (status >= 200 && status < 300)) return true;
+      if (status >= 400 && status < 500 && status !== 408 && status !== 429) return false;
+    } catch {}
+  }
+  return false;
+}
+
+function applicationPortalKey(application) {
+  for (const value of [application?.sourceUrl, application?.documentsUrl]) {
+    try {
+      const url = new URL(String(value || ""));
+      for (const key of ["keyVal", "PKID", "PARAM0"]) {
+        const portalKey = url.searchParams.get(key);
+        if (portalKey) return portalKey;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function configuredArchiveRawUrl(value, archive) {
+  try {
+    const landing = new URL(value);
+    const allowedLandingHosts = new Set((archive.allowedDocumentHosts || [])
+      .map((host) => String(host).toLowerCase()));
+    const prefix = String(archive.landingPathPrefix || "/docs/");
+    const rawBase = new URL(archive.rawDocumentBaseUrl);
+    if (landing.protocol !== "https:" || rawBase.protocol !== "https:") return null;
+    if (!allowedLandingHosts.has(landing.hostname.toLowerCase()) || !landing.pathname.startsWith(prefix)) return null;
+    const relativePath = landing.pathname.slice(prefix.length).replace(/^\/+/, "");
+    if (!relativePath || relativePath.includes("..")) return null;
+    const raw = new URL(relativePath, rawBase);
+    if (raw.hostname !== rawBase.hostname || raw.protocol !== rawBase.protocol) return null;
+    return raw.toString();
+  } catch { return null; }
 }
 
 async function processPlanningDocument(document, application, profile, options, runtime, limits, deferEligibility = false) {
@@ -621,6 +734,10 @@ async function processPlanningDocument(document, application, profile, options, 
     role: document.role,
     title: document.title,
     sourceUrl: document.url,
+    retrievalProvider: document.retrievalProvider || profile.planningAuthority.name,
+    retrievalApplicationUrl: document.retrievalApplicationUrl || application.sourceUrl,
+    officialApplicationUrl: document.officialApplicationUrl || application.sourceUrl,
+    archivedDocumentUrl: document.archivedDocumentUrl || null,
     officialPortal: profile.planningAuthority.officialPortal,
     authority: profile.planningAuthority.name,
     reuseStatus: "public-register-processing-only",
@@ -665,7 +782,7 @@ async function processPlanningDocument(document, application, profile, options, 
       : cached.cacheHit ? "shard-cache" : "network";
   } catch (error) {
     if (sourceFile) await rm(sourceFile, { force: true }).catch(() => {});
-    failures.push(failure("official-document", document.url, error, application.reference));
+    failures.push(failure(document.retrievalProvider ? "archived-planning-document" : "official-document", document.url, error, application.reference));
     return { evidence, collection: null, candidateCollection: null, sourceFile, failures, warnings };
   }
 

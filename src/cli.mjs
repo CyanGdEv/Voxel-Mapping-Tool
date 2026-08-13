@@ -9,6 +9,7 @@ import { applyParkProfile, listParkProfiles, loadParkProfile } from "./lib/park-
 import { extractRasterPlanningPage } from "./lib/planning-raster-extraction.mjs";
 import {
   createAutomaticPlanningPlan,
+  requireAutomaticPlanningDocuments,
   mergePreparedPlanningShards,
   prepareAutomaticPlanningShard
 } from "./lib/planning-discovery.mjs";
@@ -357,6 +358,7 @@ async function main() {
     };
     if (command === "planning-plan") {
       const plan = await createAutomaticPlanningPlan(options, runtime);
+      requireAutomaticPlanningDocuments(plan);
       const output = path.resolve(options.out || "planning-plan.json");
       await writeJson(output, plan, 0);
       console.log(JSON.stringify({ output, applications: plan.applications.length, documents: plan.documentQueue.length }, null, 2));

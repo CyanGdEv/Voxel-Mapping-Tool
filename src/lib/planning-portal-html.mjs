@@ -41,11 +41,34 @@ export function extractApplicationLinks(html, baseUrl, allowedHosts = []) {
 
 export function extractDocumentLinks(html, baseUrl, allowedHosts = []) {
   const allowed = allowedHostSet(baseUrl, allowedHosts);
-  return [...extractHtmlLinks(html, baseUrl), ...extractNecPublicAccessDocuments(html, baseUrl)]
+  const uniqueLinks = new Map();
+  for (const link of [
+    ...extractTableDocumentLinks(html, baseUrl),
+    ...extractHtmlLinks(html, baseUrl),
+    ...extractNecPublicAccessDocuments(html, baseUrl)
+  ]) {
+    if (!uniqueLinks.has(link.url)) uniqueLinks.set(link.url, link);
+  }
+  return [...uniqueLinks.values()]
     .filter((link) => allowed.has(new URL(link.url).hostname.toLowerCase()))
     .filter((link) => isDirectDocumentLink(link.url))
     .map((link) => ({ ...link, ...classifyPlanningDocument(link.text, link.url) }))
     .sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
+}
+
+function extractTableDocumentLinks(html, baseUrl) {
+  const links = [];
+  const rows = String(html || "").match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)]
+      .map((match) => cleanText(match[1]))
+      .filter((value) => value && !/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(value));
+    const rowTitle = cells.join(" - ");
+    for (const link of extractHtmlLinks(row, baseUrl)) {
+      links.push({ ...link, text: rowTitle || link.text });
+    }
+  }
+  return links;
 }
 
 function extractNecPublicAccessDocuments(html, baseUrl) {
