@@ -1,0 +1,61 @@
+name: Consolidate planning corpus
+
+on:
+  workflow_run:
+    workflows: ["Generate 1:1 theme park"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  consolidate:
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download the input planning corpus from the completed generation
+        uses: actions/download-artifact@v8
+        with:
+          pattern: planning-corpus-${{ github.event.workflow_run.id }}-*
+          path: .tpmap-cache/planning-corpus
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download every completed shard's raw planning-document delta
+        uses: actions/download-artifact@v8
+        with:
+          pattern: planning-documents-${{ github.event.workflow_run.id }}-*
+          path: .tpmap-cache/planning-document-deltas
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Consolidate content-addressed documents without changing evidence bytes
+        id: corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .tpmap-cache/planning-corpus/.park-id
+          park="$(tr -d '\r\n' < .tpmap-cache/planning-corpus/.park-id)"
+          if [[ ! "$park" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "Invalid park id in planning corpus metadata" >&2
+            exit 1
+          fi
+          mkdir -p ".tpmap-cache/planning-corpus/$park"
+          cp -a -n .tpmap-cache/planning-document-deltas/. ".tpmap-cache/planning-corpus/$park/"
+          touch .tpmap-cache/planning-corpus/.corpus-ready
+          echo "park=$park" >> "$GITHUB_OUTPUT"
+          echo "Consolidated $(find ".tpmap-cache/planning-corpus/$park" -type f | wc -l) raw planning document(s) for $park"
+
+      - name: Save the consolidated planning-document corpus for the next run
+        uses: actions/cache/save@v6
+        with:
+          path: .tpmap-cache/planning-corpus
+          key: planning-corpus-v1-${{ runner.os }}-${{ steps.corpus.outputs.park }}-${{ github.event.workflow_run.id }}-attempt-${{ github.event.workflow_run.run_attempt }}-final
