@@ -1,14 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 import path from "node:path";
 import {
   autoGeoreferencePlanningPage,
   corroborateAutomaticPlanningCollection,
-  detectPlanningScales
+  detectPlanningScales,
+  prepareAutomaticPlanningCorroboration
 } from "../src/lib/planning-auto-georeference.mjs";
-import { discoverPlanningApplications, selectPlanningShard } from "../src/lib/planning-discovery.mjs";
+import {
+  acquireAutomaticPlanningEvidence,
+  discoverPlanningApplications,
+  loadPreparedPlanningDocuments,
+  mergePreparedPlanningShardBundles,
+  planningDocumentIdentity,
+  PREPARED_MERGED_MARKER,
+  PREPARED_SHARD_MARKER,
+  retryPlanningOperation,
+  selectPlanningShard
+} from "../src/lib/planning-discovery.mjs";
 import {
   classifyPlanningDocument,
   classifyPlanningApplication,
@@ -21,6 +33,7 @@ import { classifyComprehensivePlanningLabel } from "../src/lib/planning-comprehe
 import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "../src/lib/planning-native-vector.mjs";
 import { parseArgs } from "../src/lib/args.mjs";
 import { acquirePlanningEvidence } from "../src/lib/planning-manifest.mjs";
+import { sha256 } from "../src/lib/io.mjs";
 
 const profile = {
   id: "fixture-park",
@@ -57,8 +70,20 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(workflow, /planning-shard-count 20/);
   assert.match(workflow, /merge-multiple: true/);
   assert.match(workflow, /--planning-plan planning-plan\.json/);
-  assert.match(workflow, /--prepared-planning-directory \.tpmap-cache\/prepared-planning/);
+  assert.match(workflow, /quality-gate:/);
+  assert.match(workflow, /merge-planning/);
+  assert.match(workflow, /planning-result-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /planning-finalized-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /planning-discovery-v2-/);
+  assert.match(workflow, /planning-shard-v2-/);
+  assert.match(workflow, /Save this shard's content-addressed planning cache/);
+  assert.match(workflow, /--prepared-planning-directory \.tpmap-cache\/finalized-planning/);
   assert.match(workflow, /\.tpmap-cache\/prepared-planning\/shard-\$\{\{ matrix\.shard \}\}\.json/);
+  assert.doesNotMatch(workflow, /--allow-prepared-planning-fallback/);
+  const generateJob = workflow.split("\n  generate:\n")[1] || "";
+  assert.doesNotMatch(generateJob, /planning-cache-/);
+  assert.doesNotMatch(generateJob, /sudo apt-get install.*(?:poppler|tesseract)/);
+  assert.doesNotMatch(generateJob, /run: npm test/);
 });
 
 test("parallel planning shards cover every document exactly once", () => {
@@ -69,17 +94,151 @@ test("parallel planning shards cover every document exactly once", () => {
     queue.map((item) => item.index));
 });
 
+test("prepared planning shards merge once in frozen plan order with exact integrity", () => {
+  const plan = syntheticPlanningPlan(40);
+  const bundles = syntheticPreparedBundles(plan, 20);
+  const merged = mergePreparedPlanningShardBundles(bundles, plan, profile);
+  assert.equal(merged.marker, PREPARED_MERGED_MARKER);
+  assert.equal(merged.shardCount, 20);
+  assert.equal(merged.documentCount, 40);
+  assert.equal(merged.entriesSha256, sha256(merged.entries));
+  assert.deepEqual(merged.entries.map((entry) => entry.identity),
+    plan.documentQueue.map(planningDocumentIdentity));
+  assert.equal(merged.entries[0].failures[0].adapter, "planning-page-extraction");
+  assert.ok(merged.entries.every((entry) => !("document" in entry) && !("application" in entry)));
+
+  assert.throws(() => mergePreparedPlanningShardBundles(bundles.slice(1), plan, profile),
+    /expected 20 shard bundles but found 19/);
+  const tampered = structuredClone(bundles);
+  tampered[0].assignedDocumentIdentities.reverse();
+  assert.throws(() => mergePreparedPlanningShardBundles(tampered, plan, profile),
+    /assignment does not match/);
+  const swapped = structuredClone(bundles);
+  [swapped[0].entries[0], swapped[1].entries[0]] = [swapped[1].entries[0], swapped[0].entries[0]];
+  assert.throws(() => mergePreparedPlanningShardBundles(swapped, plan, profile),
+    /entries do not match its frozen assignment/);
+});
+
+test("planning extraction retries only the failed bounded operation once", async () => {
+  let recoveredAttempts = 0;
+  const recovered = await retryPlanningOperation(async () => {
+    recoveredAttempts += 1;
+    if (recoveredAttempts === 1) throw new Error("transient page failure");
+    return "page-result";
+  });
+  assert.deepEqual(recovered, { value: "page-result", retries: 1 });
+  assert.equal(recoveredAttempts, 2);
+
+  let failedAttempts = 0;
+  await assert.rejects(async () => retryPlanningOperation(async () => {
+    failedAttempts += 1;
+    throw new Error("persistent page failure");
+  }), (error) => error.message === "persistent page failure" && error.planningRetryCount === 1);
+  assert.equal(failedAttempts, 2);
+});
+
+test("prepared handoff retains shard failures without downloading or extracting documents again", async () => {
+  const plan = syntheticPlanningPlan(160);
+  const merged = mergePreparedPlanningShardBundles(syntheticPreparedBundles(plan, 20), plan, profile);
+  const directory = await mkdtemp(path.join(os.tmpdir(), "tpmap-zero-rework-handoff-"));
+  await writeFile(path.join(directory, "prepared-planning.json"), JSON.stringify(merged));
+  let fetches = 0;
+  const progress = [];
+  const processed = await loadPreparedPlanningDocuments(
+    directory,
+    plan,
+    plan.documentQueue,
+    { parkProfile: profile },
+    {
+      center: { lon: 0, lat: 51.01 },
+      cacheDir: directory,
+      fetchBinary: async () => { fetches += 1; throw new Error("handoff must not fetch"); },
+      progress: (message) => progress.push(message)
+    }
+  );
+  assert.equal(fetches, 0);
+  assert.equal(processed.length, 160);
+  assert.deepEqual({
+    mode: processed.handoffDiagnostics.mode,
+    documents: processed.handoffDiagnostics.documents,
+    downloads: processed.handoffDiagnostics.downloads,
+    extractionRetries: processed.handoffDiagnostics.extractionRetries
+  }, { mode: "zero-rework", documents: 160, downloads: 0, extractionRetries: 0 });
+  assert.ok(processed.every((entry) => entry.evidence.preparedHandoffMode === "zero-rework"));
+  assert.equal(processed[0].evidence.acquired, true);
+  assert.equal(processed[0].failures[0].adapter, "planning-page-extraction");
+  assert.ok(progress.every((message) => /(?:zero|0) extraction retries/.test(message)));
+  assert.match(progress.at(-1), /0 downloads; 0 extraction retries/);
+});
+
+test("an invalid prepared handoff fails closed instead of silently starting serial extraction", async () => {
+  const plan = syntheticPlanningPlan(1);
+  const directory = await mkdtemp(path.join(os.tmpdir(), "tpmap-invalid-handoff-"));
+  const planPath = path.join(directory, "planning-plan.json");
+  await writeFile(planPath, JSON.stringify(plan));
+  let fetches = 0;
+  await assert.rejects(() => acquireAutomaticPlanningEvidence({
+    parkProfile: profile,
+    planningPlan: planPath,
+    preparedPlanningDirectory: directory
+  }, {
+    center: { lon: 0, lat: 51.01 },
+    cacheDir: directory,
+    fetchBinary: async () => { fetches += 1; throw new Error("must not fetch"); },
+    progress() {}
+  }), /Prepared planning handoff failed closed/);
+  assert.equal(fetches, 0);
+});
+
+test("prepared planning corroboration preserves DSM evidence and eligibility", () => {
+  const collection = {
+    type: "FeatureCollection",
+    features: [0, 1, 2].map((index) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [index * 0.00001, 51.01] },
+      properties: { kind: "building", planning_authoritative: true }
+    }))
+  };
+  let samples = 0;
+  const runtime = {
+    center: { lon: 0, lat: 51.01 },
+    elevation: {
+      samplePairLocal() {
+        samples += 1;
+        return { terrain: 100, surface: 105 };
+      }
+    }
+  };
+  const existingInput = { status: "Approved and completed", proposal: "Existing as-built station" };
+  const existing = corroborateAutomaticPlanningCollection(
+    collection, existingInput, runtime, prepareAutomaticPlanningCorroboration(existingInput)
+  );
+  assert.equal(existing.worldEligible, true);
+  assert.equal(existing.dsm.samples, 3);
+  assert.equal(samples, 3);
+
+  const proposedInput = { status: "Approved", proposal: "Proposed station" };
+  const proposed = corroborateAutomaticPlanningCollection(
+    collection, proposedInput, runtime, prepareAutomaticPlanningCorroboration(proposedInput)
+  );
+  assert.equal(proposed.worldEligible, true);
+  assert.equal(proposed.dsm.samples, 3);
+  assert.equal(samples, 6);
+});
+
 test("automatic planning controls are bounded and can be explicitly disabled for expert inputs", () => {
   const parsed = parseArgs([
     "build", "--park", "thorpe-park", "--max-planning-applications", "300",
     "--max-planning-documents", "120", "--max-planning-pages-per-document", "16",
-    "--planning-georef-min-confidence", "0.8", "--no-auto-planning"
+    "--planning-georef-min-confidence", "0.8", "--no-auto-planning",
+    "--allow-prepared-planning-fallback"
   ]).options;
   assert.equal(parsed.maxPlanningApplications, 300);
   assert.equal(parsed.maxPlanningDocuments, 120);
   assert.equal(parsed.maxPlanningPagesPerDocument, 16);
   assert.equal(parsed.planningGeorefMinConfidence, 0.8);
   assert.equal(parsed.noAutoPlanning, true);
+  assert.equal(parsed.allowPreparedPlanningFallback, true);
 });
 
 test("official portal HTML adapters recover applications, metadata and ranked drawing links", () => {
@@ -521,6 +680,72 @@ test("planning labels distinguish detected ride attachments from generic site fe
   assert.equal(classifyComprehensivePlanningLabel("Permanent perimeter fence").className, "fence");
   assert.equal(classifyComprehensivePlanningLabel("Pedestrian access path").className, "path");
 });
+
+function syntheticPlanningPlan(count) {
+  return {
+    schemaVersion: 1,
+    marker: "TPMAP_AUTOMATIC_PLANNING_PLAN_V1",
+    parkId: profile.id,
+    createdAt: "2026-08-13T00:00:00.000Z",
+    discovery: {},
+    applications: [],
+    failures: [],
+    warnings: [],
+    documentQueue: Array.from({ length: count }, (_, index) => ({
+      application: {
+        reference: `APP-${index}`,
+        status: "Approved and completed",
+        proposal: "Existing as-built park feature"
+      },
+      document: {
+        id: `document-${index}`,
+        title: `Existing drawing ${index}`,
+        role: "site-layout",
+        url: `https://planning.example/documents/${index}.pdf`
+      }
+    }))
+  };
+}
+
+function syntheticPreparedBundles(plan, shardCount) {
+  return Array.from({ length: shardCount }, (_, shardIndex) => {
+    const assigned = selectPlanningShard(plan.documentQueue, shardIndex, shardCount);
+    return {
+      schemaVersion: 2,
+      marker: PREPARED_SHARD_MARKER,
+      parkId: plan.parkId,
+      planSha256: sha256(plan),
+      shardIndex,
+      shardCount,
+      assignedDocumentIdentities: assigned.map(planningDocumentIdentity),
+      entries: assigned.map((item, entryIndex) => ({
+        identity: planningDocumentIdentity(item),
+        evidence: {
+          id: item.document.id,
+          acquired: true,
+          worldEligible: false,
+          extraction: [{ page: 1, status: "geometry-ready" }]
+        },
+        candidateCollection: {
+          type: "FeatureCollection",
+          features: [{
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [0, 51.01] },
+            properties: { kind: "building", planning_authoritative: true }
+          }]
+        },
+        corroboration: prepareAutomaticPlanningCorroboration({
+          ...item.application,
+          proposal: `${item.application.proposal || ""} ${item.document.title || ""} ${item.document.role || ""}`
+        }),
+        failures: shardIndex === 0 && entryIndex === 0
+          ? [{ adapter: "planning-page-extraction", error: "prepared failure retained" }]
+          : [],
+        warnings: []
+      }))
+    };
+  });
+}
 
 function anchor(text, cx, cy) {
   const semantic = classifyComprehensivePlanningLabel(text);

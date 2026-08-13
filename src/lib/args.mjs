@@ -55,7 +55,7 @@ const BOOLEAN_FLAGS = new Set([
   "wikidata-places", "wikimedia-commons", "open-aerial-map",
   "os-ngd",
   "tree-species",
-  "strict-supplemental-sources", "no-auto-planning"
+  "strict-supplemental-sources", "no-auto-planning", "allow-prepared-planning-fallback"
 ]);
 
 export function parseArgs(argv) {

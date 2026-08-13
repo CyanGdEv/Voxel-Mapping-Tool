@@ -10,6 +10,7 @@ import {
 const DEFAULT_DPI = 300;
 const MAX_SHAPES = 12_000;
 const BNG = "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs";
+const CORROBORATION_MARKER = "TPMAP_PLANNING_CORROBORATION_INPUT_V1";
 
 export function autoGeoreferencePlanningPage({
   svg,
@@ -189,11 +190,25 @@ export function detectPlanningScales(value) {
   return results;
 }
 
-export function corroborateAutomaticPlanningCollection(collection, application, runtime = {}) {
+export function prepareAutomaticPlanningCorroboration(application = {}) {
   const text = `${application.status || ""} ${application.decision || ""} ${application.proposal || ""}`;
   const acceptedDecision = /approved|grant(?:ed)?|permitted|consent|implemented|completed|lawful/i.test(text) &&
     !/refused|withdrawn|invalid|declined/i.test(text);
   const explicitExisting = /as[ -]?built|record drawing|existing|retrospective|completed|implemented|discharge of condition/i.test(text);
+  return {
+    schemaVersion: 1,
+    marker: CORROBORATION_MARKER,
+    acceptedDecision,
+    explicitExisting
+  };
+}
+
+export function corroborateAutomaticPlanningCollection(collection, application, runtime = {}, preparedInput = null) {
+  const prepared = preparedInput || prepareAutomaticPlanningCorroboration(application);
+  if (prepared?.schemaVersion !== 1 || prepared?.marker !== CORROBORATION_MARKER) {
+    throw new Error("Prepared planning corroboration input is invalid");
+  }
+  const { acceptedDecision, explicitExisting } = prepared;
   let samples = 0, structureMatches = 0;
   const samplePairLocal = runtime.elevation?.samplePairLocal;
   const projector = runtime.center ? createProjector(runtime.center) : null;
