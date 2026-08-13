@@ -42,32 +42,56 @@ export async function extractRasterPlanningPage({ filename, page = 1, workDirect
   const redOcr = path.join(workDirectory, `${key}-p${page}-red-ocr.png`);
   await rm(output, { force: true });
   await rm(redOcr, { force: true });
-  await execFileAsync("python3", [TOOL, "--input", image, "--output", output, "--red-ocr-output", redOcr, "--max-shapes", "50000"], {
+  const { stdout: vectorizerStdout } = await execFileAsync("python3", [
+    TOOL,
+    "--input", image,
+    "--output", output,
+    "--red-ocr-output", redOcr,
+    "--max-polygons", "12000",
+    "--max-lines", "12000"
+  ], {
     timeout: 180_000,
-    maxBuffer: 8 * 1024 * 1024
+    maxBuffer: 8 * 1024 * 1024,
+    encoding: "utf8",
+    env: planningRasterProcessEnvironment()
   });
+  const vectorizer = parseVectorizerMetadata(vectorizerStdout);
   const svg = await readFile(output, "utf8");
 
   // Born-digital planning PDFs already contain exact title-block and annotation text.
-  // Prefer that source to a 10k x 7k full-page OCR pass; retain red-mask OCR for
-  // colour-specific construction/exclusion labels. Scanned PDFs fall back to OCR.
+  // Prefer that source to a 10k x 7k full-page OCR pass. Colour-specific OCR is
+  // limited to the exact red evidence extent, with coordinates mapped back to the
+  // original 300-DPI page. Scanned PDFs still use full-page OCR as before.
   const nativeText = String(document.mime || "") === "application/pdf"
     ? await extractNativePdfTextObservations(filename, page, svg)
     : { anchors: [], lines: [], source: "not-pdf" };
   const nativeUsable = nativeText.lines.length >= 3;
-  const [primaryText, redText] = nativeUsable
-    ? [nativeText, await extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })]
-    : await Promise.all([
-        extractRasterTextObservations(image),
-        extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })
-      ]);
+  const redTextPromise = vectorizer.redOcr.present
+    ? extractRasterTextObservations(redOcr, {
+        coordinateScale: 1 / vectorizer.redOcr.scale,
+        coordinateOffsetX: vectorizer.redOcr.x,
+        coordinateOffsetY: vectorizer.redOcr.y,
+        minimumConfidence: 20
+      })
+    : Promise.resolve({ anchors: [], lines: [] });
+  let primaryText, redText;
+  if (nativeUsable) {
+    primaryText = nativeText;
+    redText = await redTextPromise;
+  } else {
+    [primaryText, redText] = await Promise.all([
+      extractRasterTextObservations(image),
+      redTextPromise
+    ]);
+  }
   const anchors = mergeOcrAnchors(primaryText.anchors, redText.anchors);
   const rawLines = mergeRawLines(primaryText.lines, redText.lines);
+  const redSource = vectorizer.redOcr.present ? "+tesseract-red-tsv" : "";
   const semantic = {
     anchors,
     rawLines,
     scaleCandidates: detectPlanningScales(rawLines.map((line) => line.text).join("\n")),
-    source: nativeUsable ? "pdftotext-bbox+tesseract-red-tsv" : "tesseract-tsv"
+    source: nativeUsable ? `pdftotext-bbox${redSource}` : `tesseract-tsv${redSource}`
   };
   if (cache) await writeCachedDerivative(cache, { svg, semantic });
   return {
@@ -314,6 +338,8 @@ export function parseTesseractTsv(value, options = {}) {
 
 export function parseTesseractTsvObservations(value, options = {}) {
   const coordinateScale = Number(options.coordinateScale) || 1;
+  const coordinateOffsetX = Number(options.coordinateOffsetX) || 0;
+  const coordinateOffsetY = Number(options.coordinateOffsetY) || 0;
   const minimumConfidence = Number(options.minimumConfidence ?? 35);
   const rows = String(value || "").split(/\r?\n/).slice(1).map((line) => line.split("\t"));
   const lines = new Map();
@@ -323,7 +349,8 @@ export function parseTesseractTsvObservations(value, options = {}) {
     const text = fields.slice(11).join("\t").trim();
     if (!text || !Number.isFinite(confidence) || confidence < minimumConfidence) continue;
     const key = fields.slice(1, 5).join(":");
-    const x = Number(fields[6]) * coordinateScale, y = Number(fields[7]) * coordinateScale;
+    const x = Number(fields[6]) * coordinateScale + coordinateOffsetX;
+    const y = Number(fields[7]) * coordinateScale + coordinateOffsetY;
     const width = Number(fields[8]) * coordinateScale, height = Number(fields[9]) * coordinateScale;
     if (![x, y, width, height].every(Number.isFinite)) continue;
     const line = lines.get(key) || { words: [], xMin: x, yMin: y, xMax: x + width, yMax: y + height, confidence: 0 };
@@ -354,6 +381,41 @@ export function parseTesseractTsvObservations(value, options = {}) {
     }];
   });
   return { anchors, lines: rawLines };
+}
+
+function parseVectorizerMetadata(value) {
+  const lines = String(value || "").trim().split(/\r?\n/).filter(Boolean);
+  let metadata;
+  try { metadata = JSON.parse(lines.at(-1) || ""); }
+  catch { throw new Error("planning raster vectorizer emitted invalid metadata"); }
+  const red = metadata?.redOcr || {};
+  const scale = Number(red.scale);
+  const x = Number(red.x), y = Number(red.y);
+  if (red.present === true && (![x, y, scale].every(Number.isFinite) || scale <= 0)) {
+    throw new Error("planning raster vectorizer emitted invalid red OCR registration metadata");
+  }
+  return {
+    ...metadata,
+    redOcr: {
+      present: red.present === true,
+      x: red.present === true ? x : 0,
+      y: red.present === true ? y : 0,
+      scale: red.present === true ? scale : 1
+    }
+  };
+}
+
+function planningRasterProcessEnvironment() {
+  const threads = String(positiveInteger(process.env.TPMAP_RASTER_THREADS, 1));
+  return {
+    ...process.env,
+    TPMAP_OPENCV_THREADS: threads,
+    OMP_NUM_THREADS: threads,
+    OPENBLAS_NUM_THREADS: threads,
+    MKL_NUM_THREADS: threads,
+    NUMEXPR_NUM_THREADS: threads,
+    OPENCV_FOR_THREADS_NUM: threads
+  };
 }
 
 function mergeOcrAnchors(...groups) {
