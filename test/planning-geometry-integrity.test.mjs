@@ -121,7 +121,7 @@ test("auto georeference removes a text glyph but keeps a plan footprint", () => 
   assert.equal(result.collection.features[0].properties.kind, "building");
 });
 
-test("raster plans without explicit north evidence remain evidence-only", () => {
+test("raster plans without explicit north evidence remain pending until OSM registration", () => {
   const semantic = classifyComprehensivePlanningLabel("Proposed building");
   const result = autoGeoreferencePlanningPage({
     svg: '<svg viewBox="0 0 1000 700"><polygon points="50,50 950,50 950,650 50,650" stroke="#e00000"/><polygon points="200,200 400,200 400,350 200,350"/></svg>',
@@ -133,8 +133,10 @@ test("raster plans without explicit north evidence remain evidence-only", () => 
     document: { id: "site-plan", title: "Proposed Site Plan", role: "site-layout", dpi: 300 },
     profile: { name: "Fixture Park" }
   });
-  assert.equal(result.status, "drawing-orientation-unavailable");
-  assert.equal(result.collection.features.length, 0);
+  assert.equal(result.status, "drawing-registration-pending");
+  assert.equal(result.collection.features.length, 1);
+  assert.equal(result.collection.features[0].properties.planning_registration_pending, true);
+  assert.equal(result.collection.features[0].properties.planning_spatial_registration_verified, false);
 });
 
 test("one OCR label cannot turn a page of nearby CAD strokes into physical objects", () => {

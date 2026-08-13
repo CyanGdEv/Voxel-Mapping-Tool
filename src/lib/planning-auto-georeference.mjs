@@ -48,19 +48,13 @@ export function autoGeoreferencePlanningPage({
     ...detectPlanningScales(rawLines.map((line) => line.text || line).join("\n")),
     ...detectPlanningScales(`${document.title || ""} ${document.description || ""}`)
   ]);
-  if (!scale || !location) {
-    return emptyResult(!scale ? "drawing-scale-unavailable" : "application-location-unavailable", parsed, scale, location, { page, geometryView });
+  if (!location) {
+    return emptyResult("application-location-unavailable", parsed, scale, location, { page, geometryView });
   }
-  if (scale.denominator < MIN_RASTER_PLAN_SCALE_DENOMINATOR) {
-    return emptyResult("drawing-scale-out-of-range", parsed, scale, location, { page, geometryView });
-  }
-  const hasExplicitNorth = Number.isFinite(Number(semantic.northDegrees));
-  if (!hasExplicitNorth) {
-    return emptyResult("drawing-orientation-unavailable", parsed, scale, location, { page, geometryView });
-  }
-
-  const metresPerPixel = scale.denominator * 0.0254 / Number(document.dpi || DEFAULT_DPI);
-  if (!(metresPerPixel > 0.002 && metresPerPixel < 10)) {
+  const metresPerPixel = scale
+    ? scale.denominator * 0.0254 / Number(document.dpi || DEFAULT_DPI)
+    : null;
+  if (metresPerPixel !== null && !(metresPerPixel > 0.002 && metresPerPixel < 10)) {
     return emptyResult("drawing-scale-out-of-range", parsed, scale, location, { page, geometryView });
   }
 
@@ -88,30 +82,18 @@ export function autoGeoreferencePlanningPage({
   const redBoundaryShape = candidateShapes.filter((shape) => shape.closed && redStroke(shape.stroke))
     .sort((a, b) => approximateShapeArea(b) - approximateShapeArea(a))[0] || null;
   const siteBoundary = labelledBoundary?.shape || redBoundaryShape;
-  if (!siteBoundary) {
-    return emptyResult("drawing-registration-control-unavailable", parsed, scale, location, {
-      page, geometryView, ambiguousAssociationsRejected
-    });
-  }
-  const origin = shapeCentroid(siteBoundary);
-  const northDegrees = Number(semantic.northDegrees);
-  const projector = createProjector({ lat: location.lat, lon: location.lon });
-  const toLonLat = ({ x, y }) => {
-    const east = (x - origin.x) * metresPerPixel;
-    const south = (y - origin.y) * metresPerPixel;
-    const radians = northDegrees * Math.PI / 180;
-    const localX = east * Math.cos(radians) - south * Math.sin(radians);
-    const localZ = east * Math.sin(radians) + south * Math.cos(radians);
-    return projector.inverse([localX, localZ]);
-  };
-
-  const locationConfidence = application.locationConfidence ?? location.confidence ?? (application.geometry ? 0.94 : 0.82);
-  const originConfidence = siteBoundary ? 0.9 : 0.62;
-  const orientationConfidence = 0.92;
-  const baseConfidence = clamp(
-    scale.confidence * 0.3 + locationConfidence * 0.25 + originConfidence * 0.25 + orientationConfidence * 0.2,
-    0, 1
-  );
+  // Raster drawings are extracted in their native page coordinate space. OSM is
+  // available in the final build, not in the 20 preparation shards, so scale,
+  // rotation and translation must be resolved later as one similarity transform.
+  // The official application point is only a bounded search hint and is never
+  // treated as sufficient spatial registration on its own.
+  const origin = siteBoundary
+    ? shapeCentroid(siteBoundary)
+    : { x: parsed.width / 2, y: parsed.height / 2 };
+  const northDegrees = Number.isFinite(Number(semantic.northDegrees))
+    ? Number(semantic.northDegrees)
+    : null;
+  const toDrawingCoordinates = ({ x, y }) => [x - origin.x, y - origin.y];
 
   const features = [];
   let geometryShapesRejected = 0;
@@ -124,13 +106,13 @@ export function autoGeoreferencePlanningPage({
     if (semanticValue.className === "ride" && (semanticValue.featureClass !== "ride-track" || shape.closed)) continue;
     const role = comprehensiveSemanticGeometryRole(semanticValue, shape.closed, shape);
     if (!role || role.excluded || role.evidenceOnly) continue;
-    if (!planningShapeGeometryAllowed(shape, semanticValue, metresPerPixel)) {
+    if (metresPerPixel !== null && !planningShapeGeometryAllowed(shape, semanticValue, metresPerPixel)) {
       geometryShapesRejected += 1;
       continue;
     }
-    const confidence = clamp(baseConfidence * (0.72 + 0.28 * Number(association.anchor.ocrConfidence || 0.65)), 0, 1);
+    const confidence = clamp(0.55 + 0.45 * Number(association.anchor.ocrConfidence || 0.65), 0, 1);
     if (confidence < minimumConfidence) continue;
-    const geometry = shapeGeometry(shape, toLonLat);
+    const geometry = shapeGeometry(shape, toDrawingCoordinates);
     if (!geometry) continue;
     features.push({
       type: "Feature",
@@ -143,21 +125,27 @@ export function autoGeoreferencePlanningPage({
         ...role.tags,
         planning_authoritative: true,
         planning_auto_extracted: true,
-        planning_auto_georeferenced: true,
-        planning_spatial_registration_verified: true,
+        planning_auto_georeferenced: false,
+        planning_spatial_registration_verified: false,
+        planning_registration_pending: true,
         planning_geometry_view: geometryView.status,
         planning_geometry_view_reason: geometryView.reason,
-        planning_georeference_method: "drawing-scale-north-and-planning-site-boundary-to-application-location",
-        planning_georeference_confidence: round(confidence),
+        planning_georeference_method: "osm-similarity-registration-pending",
+        planning_georeference_confidence: 0,
         planning_page: page,
-        planning_scale_denominator: scale.denominator,
-        planning_metres_per_pixel: round(metresPerPixel, 6),
+        planning_drawing_coordinate_space: "page-pixels-relative-to-registration-control",
+        planning_drawing_origin_method: siteBoundary
+          ? labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary"
+          : "page-centre",
+        planning_declared_scale_denominator: scale?.denominator || null,
+        planning_nominal_metres_per_pixel: metresPerPixel === null ? null : round(metresPerPixel, 6),
         planning_north_rotation_degrees: northDegrees,
-        planning_north_rotation_source: "drawing-north-evidence",
+        planning_north_rotation_source: northDegrees === null ? null : "drawing-north-evidence",
         planning_semantic_label: association.anchor.text,
         planning_semantic_anchor_fanout: anchorFanout.get(association.anchor),
-        accuracy_m: round(Math.max(0.5, (1 - confidence) * 25), 2),
-        verified: confidence >= 0.82
+        planning_semantic_confidence: round(confidence),
+        accuracy_m: null,
+        verified: false
       }
     });
   }
@@ -166,11 +154,11 @@ export function autoGeoreferencePlanningPage({
     if (!isPlanningPointAnchor(anchor, parsed)) continue;
     const pointRole = comprehensivePointRole(anchor.semantic);
     if (!pointRole) continue;
-    const confidence = clamp(baseConfidence * Number(anchor.ocrConfidence || 0.65), 0, 1);
+    const confidence = clamp(0.55 + 0.45 * Number(anchor.ocrConfidence || 0.65), 0, 1);
     if (confidence < minimumConfidence) continue;
     features.push({
       type: "Feature",
-      geometry: { type: "Point", coordinates: toLonLat({ x: anchor.cx, y: anchor.cy }) },
+      geometry: { type: "Point", coordinates: toDrawingCoordinates({ x: anchor.cx, y: anchor.cy }) },
       properties: {
         id: autoId(application, document, page, features.length),
         kind: semanticKind(anchor.semantic),
@@ -179,38 +167,57 @@ export function autoGeoreferencePlanningPage({
         ...pointRole.tags,
         planning_authoritative: true,
         planning_auto_extracted: true,
-        planning_auto_georeferenced: true,
-        planning_spatial_registration_verified: true,
+        planning_auto_georeferenced: false,
+        planning_spatial_registration_verified: false,
+        planning_registration_pending: true,
         planning_geometry_view: geometryView.status,
         planning_geometry_view_reason: geometryView.reason,
-        planning_georeference_confidence: round(confidence),
+        planning_georeference_method: "osm-similarity-registration-pending",
+        planning_georeference_confidence: 0,
         planning_page: page,
-        planning_scale_denominator: scale.denominator,
+        planning_drawing_coordinate_space: "page-pixels-relative-to-registration-control",
+        planning_drawing_origin_method: siteBoundary
+          ? labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary"
+          : "page-centre",
+        planning_declared_scale_denominator: scale?.denominator || null,
+        planning_nominal_metres_per_pixel: metresPerPixel === null ? null : round(metresPerPixel, 6),
         planning_north_rotation_degrees: northDegrees,
-        planning_north_rotation_source: "drawing-north-evidence",
+        planning_north_rotation_source: northDegrees === null ? null : "drawing-north-evidence",
         planning_semantic_label: anchor.text,
-        accuracy_m: round(Math.max(0.5, (1 - confidence) * 25), 2),
-        verified: confidence >= 0.82
+        planning_semantic_confidence: round(confidence),
+        accuracy_m: null,
+        verified: false
       }
     });
   }
 
   return {
-    status: features.length ? "geometry-ready" : "no-confidence-gated-semantic-geometry",
+    status: features.length ? "drawing-registration-pending" : "no-confidence-gated-semantic-geometry",
     page,
     scale,
     location,
     metresPerPixel,
     geometryView,
-    origin: { ...origin, method: labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary" },
+    origin: {
+      ...origin,
+      method: siteBoundary
+        ? labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary"
+        : "page-centre"
+    },
     northDegrees,
-    confidence: round(baseConfidence),
+    confidence: 0,
     shapes: parsed.shapes.length,
     candidateShapes: candidateShapes.length,
     textShapesRejected,
     geometryShapesRejected,
     ambiguousAssociationsRejected,
     associatedShapes: associated.length,
+    registration: {
+      status: "pending-osm-similarity",
+      reference: "OpenStreetMap",
+      resolves: ["scale", "rotation", "translation"],
+      applicationPointUse: "bounded-search-hint-only"
+    },
     collection: { type: "FeatureCollection", features }
   };
 }

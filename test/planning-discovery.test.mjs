@@ -763,7 +763,7 @@ test("planning acquisition automatically invokes discovery when a supported park
   assert.equal(result.featureCount, 0);
 });
 
-test("drawing scale, red-line alignment and semantic extraction produce planning-authoritative GeoJSON", () => {
+test("raster extraction preserves planning vectors for final OSM similarity registration", () => {
   const svg = `<svg width="1000" height="1000" viewBox="0 0 1000 1000">
     <polygon points="100,100 900,100 900,900 100,900" stroke="rgb(220,20,20)" fill="none" />
     <polygon points="250,250 450,250 450,450 250,450" stroke="rgb(30,30,30)" fill="none" />
@@ -786,12 +786,14 @@ test("drawing scale, red-line alignment and semantic extraction produce planning
     minimumConfidence: 0.7
   });
   assert.equal(detectPlanningScales("Scale 1:500 at A1")[0].denominator, 500);
-  assert.equal(result.status, "geometry-ready");
+  assert.equal(result.status, "drawing-registration-pending");
   assert.equal(result.origin.method, "red-line-boundary");
   assert.ok(result.collection.features.some((feature) => feature.properties.kind === "building"));
   assert.ok(result.collection.features.some((feature) => feature.properties.kind === "ride_track"));
   assert.ok(result.collection.features.every((feature) => feature.properties.planning_authoritative));
-  assert.ok(result.collection.features.every((feature) => feature.properties.planning_georeference_confidence >= 0.7));
+  assert.ok(result.collection.features.every((feature) => feature.properties.planning_registration_pending));
+  assert.ok(result.collection.features.every((feature) => !feature.properties.planning_spatial_registration_verified));
+  assert.equal(result.registration.reference, "OpenStreetMap");
 });
 
 test("automatic world eligibility requires an accepted decision plus as-built/current-state evidence", () => {
