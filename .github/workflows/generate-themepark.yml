@@ -361,7 +361,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/verify-planning-build.mjs --directory "$OUTPUT_DIR"
+          node scripts/verify-planning-build.mjs \
+            --directory "$OUTPUT_DIR" \
+            --profile "config/parks/$PARK_ID.json"
           world_file="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.mcworld' -print -quit)"
           test -n "$world_file"
           geojson_file="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.geojson' ! -name '*-qa.geojson' -print -quit)"
@@ -370,6 +372,7 @@ jobs:
             --manifest "$OUTPUT_DIR/world-manifest.json" \
             --labels "$OUTPUT_DIR/building-labels.json" \
             --geojson "$geojson_file" \
+            --profile "config/parks/$PARK_ID.json" \
             --out "$OUTPUT_DIR/world-validation.json" \
             --markdown "$OUTPUT_DIR/WORLD_VALIDATION.md"
 

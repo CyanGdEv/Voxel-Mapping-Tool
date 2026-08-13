@@ -21,6 +21,10 @@ import {
 } from "./reconstruction-pipeline.mjs";
 import { compactPlanningEvidence } from "./planning-manifest.mjs";
 import { applyPlanningWorldAuthority } from "./planning-world-authority.mjs";
+import {
+  assessPlanningSpatialContract,
+  enforcePlanningSpatialContract
+} from "./planning-spatial-contract.mjs";
 
 export async function buildPark(options = {}, progress = () => {}) {
   options = { planningWorldAuthority: "planning-only", ...options };
@@ -81,6 +85,8 @@ export async function buildPark(options = {}, progress = () => {}) {
     map.sourceFusion.planningAuthority.world.zeroOsmWorldFeatures = finalAuthority.zeroOsmWorldFeatures;
     refreshMapDerivedData(map);
   }
+  const planningSpatialContract = assessPlanningSpatialContract(map.features, options);
+  map.planningSpatialContract = planningSpatialContract;
   let accuracy = assessAccuracy(map, sources, options);
 
   progress("Resolving the typed 3D park reconstruction graph");
@@ -122,6 +128,7 @@ export async function buildPark(options = {}, progress = () => {}) {
     rideProfiles: compactRideEvidence(rideProfiles),
     reconstructionGraph: reconstruction.graph.summary,
     reconstructionDiagnostics: reconstruction.diagnostics,
+    planningSpatialContract,
     accuracy,
     compilation: { meta: compilation.meta, stats: compilation.stats }
   });
@@ -134,6 +141,9 @@ export async function buildPark(options = {}, progress = () => {}) {
   const planningSourcesPath = await writeJson(
     path.join(outputDir, "planning-sources.json"),
     compactPlanningEvidence(sources.planning)
+  );
+  const planningSpatialContractPath = await writeJson(
+    path.join(outputDir, "planning-spatial-contract.json"), planningSpatialContract
   );
   const planningDiscoveryPath = sources.planning?.automatic
     ? await writeJson(path.join(outputDir, "planning-discovery.json"), {
@@ -219,6 +229,7 @@ export async function buildPark(options = {}, progress = () => {}) {
   // Strict mode deliberately writes its evidence and preview before refusing
   // to create either Minecraft output.
   enforceAccuracy(accuracy, options);
+  if (!options.noWorld || !options.noAddon) enforcePlanningSpatialContract(planningSpatialContract);
 
   let addon = null;
   let world = null;
@@ -244,6 +255,7 @@ export async function buildPark(options = {}, progress = () => {}) {
       fidelity: fidelityPath,
       reconstructionGraph: reconstructionGraphPath,
       planningSources: planningSourcesPath,
+      planningSpatialContract: planningSpatialContractPath,
       planningDiscovery: planningDiscoveryPath,
       acquisitionDiagnostics: acquisitionDiagnosticsPath,
       sourceAuthority: sourceAuthorityPath,

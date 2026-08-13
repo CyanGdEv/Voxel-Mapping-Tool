@@ -63,6 +63,7 @@ export function extractNativeIfcPlanning({ bytes, application = {}, document = {
           planning_authoritative: true,
           planning_auto_extracted: true,
           planning_auto_georeferenced: true,
+          planning_spatial_registration_verified: ["bng", "bng-map-conversion"].includes(registration.mode),
           planning_georeference_method: `native-ifc-${registration.mode}`,
           planning_georeference_confidence: round(confidence),
           planning_application_reference: application.reference || "unknown",

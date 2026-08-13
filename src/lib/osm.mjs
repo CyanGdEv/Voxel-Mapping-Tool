@@ -55,7 +55,7 @@ export async function normalizeMap(sources, options = {}) {
   if (structureHeightStats) sources.elevation.structureHeightStats = structureHeightStats;
 
   const boundary = String(planningWorldAuthority).toLowerCase() === "planning-only"
-    ? planningWorldBoundary(features, sources.parkName)
+    ? planningWorldBoundary(features, sources.parkName, { ...options, projector })
     : selectBoundary(features, sources, projector);
   const geojson = {
     type: "FeatureCollection",

@@ -261,7 +261,11 @@ test("prepared planning corroboration preserves DSM evidence and eligibility", (
     features: [0, 1, 2].map((index) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [index * 0.00001, 51.01] },
-      properties: { kind: "building", planning_authoritative: true }
+      properties: {
+        kind: "building",
+        planning_authoritative: true,
+        planning_spatial_registration_verified: true
+      }
     }))
   };
   let samples = 0;
@@ -771,7 +775,7 @@ test("drawing scale, red-line alignment and semantic extraction produce planning
   ];
   const result = autoGeoreferencePlanningPage({
     svg,
-    semantic: { anchors, rawLines: [{ text: "Scale 1:500" }] },
+    semantic: { anchors, rawLines: [{ text: "Scale 1:500" }], northDegrees: 0 },
     application: {
       reference: "25/0042/FUL",
       geometry: { type: "Point", coordinates: [-0.002, 51.01] },
@@ -796,7 +800,11 @@ test("automatic world eligibility requires an accepted decision plus as-built/cu
     features: [{
       type: "Feature",
       geometry: { type: "Point", coordinates: [0, 51] },
-      properties: { kind: "building", planning_authoritative: true }
+      properties: {
+        kind: "building",
+        planning_authoritative: true,
+        planning_spatial_registration_verified: true
+      }
     }]
   };
   const eligible = corroborateAutomaticPlanningCollection(collection, {

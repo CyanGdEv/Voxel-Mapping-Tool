@@ -196,6 +196,7 @@ export function compileMap({ parkName, map, sources, accuracy, options = {} }) {
       pathGeometryEvidence: map.pathGeometry || null,
       pathTopologyEvidence: map.pathTopology || null,
       sourceFusion: map.sourceFusion || null,
+      planningSpatialContract: map.planningSpatialContract || null,
       pathTerrainOutput,
       pathEdgeOutput,
       terrainDetailEvidence: map.terrainDetails || null,
@@ -575,8 +576,17 @@ function compileVerticalFeatures(context) {
           heightM = inferredHeight(feature);
           stats.inferredBuildingHeights += 1;
         } else {
-          heightM = 1;
           stats.footprintOnlyBuildings += 1;
+          const marker = compileBuildingMarker({
+            add, feature, polygons, rings, mask, elevationY, surface, accessDistance,
+            minX, minZ, width, height, signs, usedSignCells, assignedEntrance
+          });
+          stats.buildingMarkerFootprints += marker.cells ? 1 : 0;
+          stats.unrepresentedBuildingFeatures += marker.cells ? 0 : 1;
+          stats.buildingMarkerCells += marker.cells;
+          stats.unnamedBuildingMarkers += marker.cells && !marker.sign ? 1 : 0;
+          recordBuildingSignStats(stats, marker.sign);
+          continue;
         }
       }
       const wallBlock = buildingBlock(feature);
@@ -690,9 +700,10 @@ function compileVerticalFeatures(context) {
             else if (feature.kind === "rail") add(3, x1, terrainY + 1, z, x2, terrainY + 1, z, "minecraft:iron_block");
             else if (feature.kind === "ride_support") add(3, x1, terrainY + 1, z, x2, terrainY + 3, z, "minecraft:iron_bars");
             else {
-              const verifiedY = feature.vertical.elevationM !== null
-                ? Math.round(feature.vertical.elevationM - minDatum)
-                : null;
+              const explicitRideElevation = verifiedRideElevation(feature);
+              const verifiedY = explicitRideElevation === null
+                ? null
+                : Math.round(explicitRideElevation - minDatum);
               if (verifiedY === null) {
                 add(3, x1, terrainY + 2, z, x2, terrainY + 2, z, "minecraft:orange_concrete");
                 stats.groundPlanRideTracks += 1;
@@ -799,6 +810,14 @@ function compileVerticalFeatures(context) {
     stats.vegetationCanopyMatchedModels += aerialCanopy.models;
   }
   return stats;
+}
+
+function verifiedRideElevation(feature) {
+  const vertical = feature?.vertical || {};
+  if (!Number.isFinite(vertical.elevationM) || vertical.explicit !== true) return null;
+  const source = String(vertical.elevationSource || "").toLowerCase();
+  if (/terrain|dtm|base-sampler|ground-associated/.test(source)) return null;
+  return Number(vertical.elevationM);
 }
 
 function buildMappedVegetationMask(map, raster) {
@@ -1270,6 +1289,12 @@ function compileVegetationFeature(context) {
     if (index < 0 || !mask[index] || terrainDetailExclusion?.[index] || isAccessSurface(accessSurface?.[index])) continue;
 
     if (modelClass === "shrubland") {
+      const canopyObserved = ["dense-tree-canopy", "vegetation"].includes(candidate.canopy?.class);
+      if (accuracyMode === "verified" && !canopyObserved && !Number.isFinite(evidence.crownDiameterM)) {
+        add(4, x, elevationY[index] + 1, z, x, elevationY[index] + 1, z, "minecraft:lime_concrete");
+        stats.markers += 1;
+        continue;
+      }
       const shrub = compileShrubModel({
         add, x, z, groundY: elevationY[index],
         palette: vegetationPaletteForRgb(candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle, evidence.species),
@@ -1293,6 +1318,14 @@ function compileVegetationFeature(context) {
     }
     if (resolvedHeight.observed) stats.heightMeasuredOrTagged += 1;
     else stats.heightInferred += 1;
+
+    const crownObserved = Number.isFinite(evidence.crownDiameterM) ||
+      Boolean(evidence.reconstruction || evidence.canopyGeometry);
+    if (accuracyMode === "verified" && !crownObserved) {
+      add(4, x, elevationY[index] + 1, z, x, elevationY[index] + 1, z, "minecraft:lime_concrete");
+      stats.markers += 1;
+      continue;
+    }
 
     const leafPalette = vegetationPaletteForRgb(
       candidate.canopy?.rgb, evidence.leafType, evidence.leafCycle, evidence.species
@@ -1400,10 +1433,12 @@ function resolveVegetationHeight({ x, z, evidence, elevation, modelClass, accura
     }
   }
   const hash = hash2d(x, z, seed);
-  if (modelClass === "orchard") return { heightM: 5 + hash % 4, observed: false };
-  if (modelClass === "tree-row") return { heightM: 7 + hash % 7, observed: false };
-  if (modelClass === "woodland") return { heightM: 9 + hash % 10, observed: false };
-  if ((accuracyMode || "verified") === "plausible") return { heightM: 7 + hash % 5, observed: false };
+  if ((accuracyMode || "verified") === "plausible") {
+    if (modelClass === "orchard") return { heightM: 5 + hash % 4, observed: false };
+    if (modelClass === "tree-row") return { heightM: 7 + hash % 7, observed: false };
+    if (modelClass === "woodland") return { heightM: 9 + hash % 10, observed: false };
+    return { heightM: 7 + hash % 5, observed: false };
+  }
   return { heightM: null, observed: false };
 }
 

@@ -100,14 +100,15 @@ test("auto georeference emits no world geometry from a section sheet", () => {
 test("auto georeference removes a text glyph but keeps a plan footprint", () => {
   const semantic = classifyComprehensivePlanningLabel("Proposed building");
   const result = autoGeoreferencePlanningPage({
-    svg: '<svg viewBox="0 0 1000 700"><polygon points="105,102 115,102 115,117 105,117"/><polygon points="200,200 400,200 400,350 200,350"/></svg>',
+    svg: '<svg viewBox="0 0 1000 700"><polygon points="50,50 950,50 950,650 50,650" stroke="#e00000"/><polygon points="105,102 115,102 115,117 105,117"/><polygon points="200,200 400,200 400,350 200,350"/></svg>',
     semantic: {
       rawLines: [
         { text: "PROPOSED SITE PLAN", xMin: 400, yMin: 30, xMax: 620, yMax: 55, ocrConfidence: 0.99 },
         { text: "Proposed building", xMin: 100, yMin: 100, xMax: 190, yMax: 120, ocrConfidence: 0.99 },
         { text: "Scale 1:200", xMin: 800, yMin: 650, xMax: 900, yMax: 670, ocrConfidence: 0.99 }
       ],
-      anchors: [{ text: "Proposed building", cx: 300, cy: 275, ocrConfidence: 0.99, semantic }]
+      anchors: [{ text: "Proposed building", cx: 300, cy: 275, ocrConfidence: 0.99, semantic }],
+      northDegrees: 0
     },
     application: { reference: "TEST/2", lat: 52.99, lon: -1.89, status: "approved" },
     document: { id: "site-plan", title: "Proposed Site Plan", role: "site-layout", dpi: 300 },
@@ -120,6 +121,43 @@ test("auto georeference removes a text glyph but keeps a plan footprint", () => 
   assert.equal(result.collection.features[0].properties.kind, "building");
 });
 
+test("raster plans without explicit north evidence remain evidence-only", () => {
+  const semantic = classifyComprehensivePlanningLabel("Proposed building");
+  const result = autoGeoreferencePlanningPage({
+    svg: '<svg viewBox="0 0 1000 700"><polygon points="50,50 950,50 950,650 50,650" stroke="#e00000"/><polygon points="200,200 400,200 400,350 200,350"/></svg>',
+    semantic: {
+      rawLines: [{ text: "Scale 1:200" }],
+      anchors: [{ text: "Proposed building", cx: 300, cy: 275, ocrConfidence: 0.99, semantic }]
+    },
+    application: { reference: "TEST/NO-NORTH", lat: 52.99, lon: -1.89, status: "approved" },
+    document: { id: "site-plan", title: "Proposed Site Plan", role: "site-layout", dpi: 300 },
+    profile: { name: "Fixture Park" }
+  });
+  assert.equal(result.status, "drawing-orientation-unavailable");
+  assert.equal(result.collection.features.length, 0);
+});
+
+test("one OCR label cannot turn a page of nearby CAD strokes into physical objects", () => {
+  const semantic = classifyComprehensivePlanningLabel("Existing wall");
+  const strokes = Array.from({ length: 65 }, (_, index) =>
+    `<line x1="${490 + index % 5}" y1="490" x2="${505 + index % 5}" y2="505"/>`
+  ).join("");
+  const result = autoGeoreferencePlanningPage({
+    svg: `<svg viewBox="0 0 1000 700"><polygon points="50,50 950,50 950,650 50,650" stroke="#e00000"/>${strokes}</svg>`,
+    semantic: {
+      rawLines: [{ text: "Scale 1:200" }],
+      anchors: [{ text: "Existing wall", cx: 500, cy: 500, ocrConfidence: 0.99, semantic }],
+      northDegrees: 0
+    },
+    application: { reference: "TEST/FANOUT", lat: 52.99, lon: -1.89, status: "approved" },
+    document: { id: "site-plan", title: "Existing Site Plan", role: "site-layout", dpi: 300 },
+    profile: { name: "Fixture Park", worldCoverage: { maximumSemanticAnchorFanout: 64 } },
+    minimumConfidence: 0.5
+  });
+  assert.ok(result.ambiguousAssociationsRejected >= 65);
+  assert.equal(result.collection.features.length, 0);
+});
+
 test("planning-only authority quarantines title-block and impossible auto geometry before boundary derivation", () => {
   const planningFeature = (id, kind, name, localGeometry) => ({
     id, kind, name, localGeometry,
@@ -127,6 +165,7 @@ test("planning-only authority quarantines title-block and impossible auto geomet
     tags: {
       planning_authoritative: true,
       planning_auto_extracted: true,
+      planning_spatial_registration_verified: true,
       planning_semantic_label: name
     },
     source: { provider: "Fixture Planning Council", dataset: "planning-drawing-vector" },

@@ -19,6 +19,22 @@ const [worldBytes, manifest, labelIndex, geojson] = await Promise.all([
   readJson(options.labels),
   readJson(options.geojson)
 ]);
+let profile = null;
+if (options.profile) {
+  profile = await readJson(options.profile);
+  const coverage = profile.worldCoverage;
+  if (coverage) {
+    const bounds = coverage.chunkBounds;
+    const expectedChunks = (bounds.maxChunkX - bounds.minChunkX + 1) * (bounds.maxChunkZ - bounds.minChunkZ + 1);
+    assert.equal(expectedChunks, coverage.expectedChunks, "profile coverage rectangle is internally inconsistent");
+    assert.equal(manifest.chunks, coverage.expectedChunks,
+      "manifest chunk count does not match the independent park profile contract");
+    assert.deepEqual(manifest.chunkBounds, bounds,
+      "manifest chunk bounds do not match the independent park profile contract");
+    assert.equal(manifest.marginBlocks, coverage.marginBlocks,
+      "manifest margin does not match the independent park profile contract");
+  }
+}
 const archive = unzipSync(new Uint8Array(worldBytes));
 for (const required of ["level.dat", "levelname.txt", "db/CURRENT"]) {
   assert.ok(archive[required], `finished .mcworld is missing ${required}`);
@@ -171,6 +187,7 @@ const report = {
     sha256,
     levelName: levelDat.value.LevelName.value,
     chunksExpected: manifest.chunks,
+    chunksRequiredByProfile: profile?.worldCoverage?.expectedChunks || null,
     chunksDecoded: overworld.chunks.size,
     subchunksScanned,
     paletteNames: [...paletteNames].sort()
