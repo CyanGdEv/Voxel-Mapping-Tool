@@ -94,8 +94,8 @@ export function assessAccuracy(map, sources, options = {}) {
     message: `${explicitTunnelTracks.length} mapped tunnel feature(s) contain ${tunnelProfileGaps} hidden profile sample gap(s); evidence mode excavates only height-evidenced portions.`
   });
   if (resolvedRideAttachments.length < rideAttachments.length) gaps.push({
-    severity: "critical", code: "RIDE_ATTACHMENTS_WITHHELD",
-    message: `${rideAttachments.length - resolvedRideAttachments.length} of ${rideAttachments.length} detected ride attachment feature(s) lack enough vertical/ride evidence to compile without fabrication.`
+    severity: "high", code: "RIDE_ATTACHMENTS_WITHHELD",
+    message: `${rideAttachments.length - resolvedRideAttachments.length} of ${rideAttachments.length} detected ride attachment feature(s) lack enough vertical/ride evidence to compile without fabrication; verified output withholds them.`
   });
   if (misalignedProfiles.length) gaps.push({
     severity: "critical", code: "RIDE_PLAN_PROFILE_MISALIGNED",
@@ -172,8 +172,8 @@ export function assessAccuracy(map, sources, options = {}) {
     }
   }
   if (bridgeEvidence.mappedFeatures && bridgeEvidence.verticalEvidenced < bridgeEvidence.mappedFeatures) gaps.push({
-    severity: "critical", code: "BRIDGE_VERTICAL_GEOMETRY_PARTIAL",
-    message: `${bridgeEvidence.mappedFeatures - bridgeEvidence.verticalEvidenced} of ${bridgeEvidence.mappedFeatures} mapped bridge features have no explicit or measured deck elevation; verified output keeps them as orange plan markers.`
+    severity: "high", code: "BRIDGE_VERTICAL_GEOMETRY_PARTIAL",
+    message: `${bridgeEvidence.mappedFeatures - bridgeEvidence.verticalEvidenced} of ${bridgeEvidence.mappedFeatures} mapped bridge features have no explicit or measured deck elevation; verified output keeps them as orange plan markers instead of inventing deck height.`
   });
   if (!treeEvidence.mappedFeatures) gaps.push({
     severity: "high", code: "TREE_DATA_ABSENT",
