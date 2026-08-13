@@ -10,6 +10,7 @@ import {
 } from "../src/lib/planning-geometry-integrity.mjs";
 import { autoGeoreferencePlanningPage } from "../src/lib/planning-auto-georeference.mjs";
 import { classifyComprehensivePlanningLabel } from "../src/lib/planning-comprehensive-semantics.mjs";
+import { applyPlanningWorldAuthority } from "../src/lib/planning-world-authority.mjs";
 
 const parsed = { width: 1000, height: 700 };
 
@@ -117,4 +118,41 @@ test("auto georeference removes a text glyph but keeps a plan footprint", () => 
   assert.equal(result.textShapesRejected, 1);
   assert.equal(result.collection.features.length, 1);
   assert.equal(result.collection.features[0].properties.kind, "building");
+});
+
+test("planning-only authority quarantines title-block and impossible auto geometry before boundary derivation", () => {
+  const planningFeature = (id, kind, name, localGeometry) => ({
+    id, kind, name, localGeometry,
+    geometry: localGeometry,
+    tags: {
+      planning_authoritative: true,
+      planning_auto_extracted: true,
+      planning_semantic_label: name
+    },
+    source: { provider: "Fixture Planning Council", dataset: "planning-drawing-vector" },
+    vertical: {},
+    verification: {}
+  });
+  const features = [
+    planningFeature("good", "building", "Proposed station building", {
+      type: "Polygon", coordinates: [[[0, 0], [40, 0], [40, 25], [0, 25], [0, 0]]]
+    }),
+    planningFeature("address", "water", "POND HOUSE, NORTHEND, HENLEY-ON-THAMES, OXON RG9 6LG", {
+      type: "Polygon", coordinates: [[[10, 10], [20, 10], [20, 20], [10, 20], [10, 10]]]
+    }),
+    planningFeature("huge", "building", "toilet", {
+      type: "Polygon", coordinates: [[[0, 0], [360, 0], [360, 260], [0, 260], [0, 0]]]
+    }),
+    {
+      id: "independent-tree", kind: "vegetation", name: "Measured tree",
+      geometry: { type: "Point", coordinates: [5, 5] },
+      localGeometry: { type: "Point", coordinates: [5, 5] },
+      tags: {}, source: { provider: "Independent tree survey" }, vertical: {}, verification: {}
+    }
+  ];
+  const evidence = applyPlanningWorldAuthority(features, { planningWorldAuthority: "planning-only" });
+  assert.deepEqual(features.map((feature) => feature.id).sort(), ["good", "independent-tree"]);
+  assert.equal(evidence.planningSpatialOutliersRemoved, 2);
+  assert.equal(evidence.planningSpatialOutlierReasons["title-block-postcode-label"], 1);
+  assert.equal(evidence.planningSpatialOutlierReasons["implausible-building-span"], 1);
 });
