@@ -8,7 +8,8 @@ import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "./planning-native-v
 import { extractNativePlanningArchive } from "./planning-native-archive.mjs";
 import {
   autoGeoreferencePlanningPage,
-  corroborateAutomaticPlanningCollection
+  corroborateAutomaticPlanningCollection,
+  prepareAutomaticPlanningCorroboration
 } from "./planning-auto-georeference.mjs";
 import {
   applicationIdentity,
@@ -29,7 +30,8 @@ const MAX_PAGES_HARD = 50;
 const MAX_PLANIT_CANDIDATE_SCAN = 600;
 const APPLICATION_CRAWL_CONCURRENCY = 4;
 const DOCUMENT_PROCESS_CONCURRENCY = 4;
-const PREPARED_SHARD_MARKER = "TPMAP_PREPARED_PLANNING_SHARD_V1";
+export const PREPARED_SHARD_MARKER = "TPMAP_PREPARED_PLANNING_SHARD_V2";
+export const PREPARED_MERGED_MARKER = "TPMAP_PREPARED_PLANNING_MERGED_V1";
 const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
 const DOCUMENT_REQUEST_TIMEOUT_MS = 120_000;
 const PORTAL_RETRIES = 1;
@@ -105,7 +107,11 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
   let processed = 0, acquired = 0, rawDocumentCacheHits = 0, pageResults = 0;
   const failures = [];
   const entries = await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
-    const value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
+    let value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
+    if (!value.evidence.acquired) {
+      value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
+      value.evidence.preparationRetries = (value.evidence.preparationRetries || 0) + 1;
+    }
     processed += 1;
     if (value.evidence.acquired) acquired += 1;
     if (value.evidence.cacheHit) rawDocumentCacheHits += 1;
@@ -114,21 +120,21 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
     emitProgress(runtime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
     return {
       identity: planningDocumentIdentity({ document, application }),
-      document,
-      application,
       evidence: value.evidence,
       candidateCollection: value.candidateCollection,
+      corroboration: prepareAutomaticPlanningCorroboration(planningCorroborationInput(application, document)),
       failures: value.failures,
       warnings: value.warnings
     };
   });
   const bundle = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     marker: PREPARED_SHARD_MARKER,
     parkId: plan.parkId,
     planSha256: sha256(plan),
     shardIndex,
     shardCount,
+    assignedDocumentIdentities: queue.map(planningDocumentIdentity),
     entries
   };
   const output = options.out ? await writeJson(path.resolve(options.out), bundle, 0) : null;
@@ -153,12 +159,16 @@ async function processAutomaticPlanningPlan(plan, options, planningRuntime) {
   if (options.preparedPlanningDirectory) {
     try {
       processedDocuments = await loadPreparedPlanningDocuments(
-        path.resolve(options.preparedPlanningDirectory), plan, documentQueue, options, planningRuntime, limits
+        path.resolve(options.preparedPlanningDirectory), plan, documentQueue, options, planningRuntime
       );
+      result.preparedHandoff = processedDocuments.handoffDiagnostics;
       emitProgress(planningRuntime,
         `Planning extraction: reused ${processedDocuments.length}/${documentQueue.length} prepared document result(s)`);
     } catch (error) {
-      result.warnings.push(`Prepared planning handoff was not reusable (${error.message}); cached documents will be processed normally.`);
+      if (!options.allowPreparedPlanningFallback) {
+        throw new Error(`Prepared planning handoff failed closed: ${error.message}`);
+      }
+      result.warnings.push(`Prepared planning handoff was not reusable (${error.message}); explicit fallback enabled.`);
     }
   }
   if (!processedDocuments) {
@@ -211,13 +221,30 @@ async function processAutomaticPlanningPlan(plan, options, planningRuntime) {
   return result;
 }
 
-async function loadPreparedPlanningDocuments(directory, plan, documentQueue, options, runtime, limits) {
-  const filenames = (await readdir(directory, { withFileTypes: true }))
+export async function mergePreparedPlanningShards({ directory, plan, profile, output }) {
+  const filenames = (await readdir(path.resolve(directory), { withFileTypes: true }))
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => path.join(directory, entry.name))
+    .map((entry) => path.join(path.resolve(directory), entry.name))
     .sort();
   if (!filenames.length) throw new Error("no prepared shard bundles were found");
-  const bundles = await Promise.all(filenames.map(readJson));
+  const bundles = (await Promise.all(filenames.map(readJson)))
+    .filter((bundle) => bundle?.marker === PREPARED_SHARD_MARKER);
+  const merged = mergePreparedPlanningShardBundles(bundles, plan, profile);
+  const outputPath = output ? await writeJson(path.resolve(output), merged, 0) : null;
+  return {
+    schemaVersion: 1,
+    parkId: merged.parkId,
+    shardCount: merged.shardCount,
+    documents: merged.entries.length,
+    entriesSha256: merged.entriesSha256,
+    output: outputPath,
+    bundle: merged
+  };
+}
+
+export function mergePreparedPlanningShardBundles(bundles, plan, profile = null) {
+  validateAutomaticPlanningPlan(plan, profile || { id: plan?.parkId });
+  if (!Array.isArray(bundles) || !bundles.length) throw new Error("no prepared shard bundles were found");
   const expectedPlanHash = sha256(plan);
   const shardCount = bundles[0]?.shardCount;
   if (!Number.isInteger(shardCount) || shardCount < 1 || bundles.length !== shardCount) {
@@ -225,8 +252,9 @@ async function loadPreparedPlanningDocuments(directory, plan, documentQueue, opt
   }
   const shardIndexes = new Set();
   const byIdentity = new Map();
+  const queueByIdentity = new Map(plan.documentQueue.map((item) => [planningDocumentIdentity(item), item]));
   for (const bundle of bundles) {
-    if (bundle?.schemaVersion !== 1 || bundle?.marker !== PREPARED_SHARD_MARKER ||
+    if (bundle?.schemaVersion !== 2 || bundle?.marker !== PREPARED_SHARD_MARKER ||
       bundle.parkId !== plan.parkId || bundle.planSha256 !== expectedPlanHash || bundle.shardCount !== shardCount) {
       throw new Error("prepared shard metadata does not match the frozen planning plan");
     }
@@ -234,38 +262,113 @@ async function loadPreparedPlanningDocuments(directory, plan, documentQueue, opt
       shardIndexes.has(bundle.shardIndex) || !Array.isArray(bundle.entries)) {
       throw new Error("prepared shard indexes or entries are invalid");
     }
+    const assigned = selectPlanningShard(plan.documentQueue, bundle.shardIndex, shardCount)
+      .map(planningDocumentIdentity);
+    if (sha256(bundle.assignedDocumentIdentities || []) !== sha256(assigned)) {
+      throw new Error(`prepared shard ${bundle.shardIndex} assignment does not match the frozen plan`);
+    }
+    if (sha256(bundle.entries.map((entry) => entry?.identity)) !== sha256(assigned)) {
+      throw new Error(`prepared shard ${bundle.shardIndex} entries do not match its frozen assignment`);
+    }
     shardIndexes.add(bundle.shardIndex);
     for (const entry of bundle.entries) {
-      if (!entry?.identity || byIdentity.has(entry.identity)) throw new Error("prepared document identity is missing or duplicated");
+      if (!entry?.identity || byIdentity.has(entry.identity) || !queueByIdentity.has(entry.identity)) {
+        throw new Error("prepared document identity is missing, duplicated, or outside the plan");
+      }
+      validatePreparedCorroboration(entry, queueByIdentity.get(entry.identity));
       byIdentity.set(entry.identity, entry);
     }
   }
-  const expectedIdentities = documentQueue.map(planningDocumentIdentity);
+  const expectedIdentities = plan.documentQueue.map(planningDocumentIdentity);
   if (byIdentity.size !== expectedIdentities.length || expectedIdentities.some((identity) => !byIdentity.has(identity))) {
     throw new Error(`prepared coverage ${byIdentity.size}/${expectedIdentities.length} does not exactly match the plan`);
   }
+  const entries = expectedIdentities.map((identity) => byIdentity.get(identity));
+  return {
+    schemaVersion: 1,
+    marker: PREPARED_MERGED_MARKER,
+    parkId: plan.parkId,
+    planSha256: expectedPlanHash,
+    shardCount,
+    documentCount: entries.length,
+    entriesSha256: sha256(entries),
+    entries
+  };
+}
 
+export async function loadPreparedPlanningDocuments(directory, plan, documentQueue, options, runtime) {
+  const filenames = (await readdir(directory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.join(directory, entry.name))
+    .sort();
+  if (!filenames.length) throw new Error("no prepared planning bundle was found");
+  const files = await Promise.all(filenames.map(readJson));
+  const mergedFiles = files.filter((bundle) => bundle?.marker === PREPARED_MERGED_MARKER);
+  if (mergedFiles.length > 1) throw new Error("multiple merged planning bundles were found");
+  const merged = mergedFiles[0] || mergePreparedPlanningShardBundles(
+    files.filter((bundle) => bundle?.marker === PREPARED_SHARD_MARKER), plan, options.parkProfile
+  );
+  validateMergedPlanningBundle(merged, plan, documentQueue);
+  const byIdentity = new Map(merged.entries.map((entry) => [entry.identity, entry]));
+
+  const startedAt = Date.now();
+  const progressEvery = Math.max(1, Math.ceil(documentQueue.length / 20));
   let completed = 0;
-  return mapLimit(documentQueue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
+  const processedDocuments = [];
+  for (const { document, application } of documentQueue) {
     const entry = byIdentity.get(planningDocumentIdentity({ document, application }));
-    let processed;
-    const retryExtractionFailure = (entry.failures || []).some((item) =>
-      ["planning-page-extraction", "planning-native-archive-extraction"].includes(item.adapter));
-    if (!entry.evidence?.acquired || retryExtractionFailure) {
-      processed = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits);
-    } else {
-      processed = finalizePlanningDocument({
-        evidence: { ...entry.evidence, preparedShardHit: true },
-        candidateCollection: entry.candidateCollection,
-        sourceFile: null,
-        failures: [...(entry.failures || [])],
-        warnings: [...(entry.warnings || [])]
-      }, application, document, runtime);
-    }
+    validatePreparedCorroboration(entry, { document, application });
+    const processed = finalizePlanningDocument({
+      evidence: {
+        ...entry.evidence,
+        preparedShardHit: true,
+        preparedHandoffMode: "zero-rework"
+      },
+      candidateCollection: entry.candidateCollection,
+      sourceFile: null,
+      failures: [...(entry.failures || [])],
+      warnings: [...(entry.warnings || [])]
+    }, application, document, runtime, entry.corroboration);
     completed += 1;
-    emitProgress(runtime, `Planning prepared handoff: ${completed}/${documentQueue.length} document(s)`);
-    return processed;
+    if (completed === documentQueue.length || completed % progressEvery === 0) {
+      emitProgress(runtime, `Planning prepared merge: ${completed}/${documentQueue.length} document(s), zero extraction retries`);
+    }
+    processedDocuments.push(processed);
+  }
+  const handoffDiagnostics = {
+    mode: "zero-rework",
+    documents: completed,
+    durationMs: Date.now() - startedAt,
+    downloads: 0,
+    extractionRetries: 0,
+    planSha256: merged.planSha256,
+    entriesSha256: merged.entriesSha256
+  };
+  Object.defineProperty(processedDocuments, "handoffDiagnostics", {
+    enumerable: false,
+    value: handoffDiagnostics
   });
+  emitProgress(runtime,
+    `Planning prepared merge complete: ${completed} document(s) in ${handoffDiagnostics.durationMs} ms; 0 downloads; 0 extraction retries`);
+  return processedDocuments;
+}
+
+function validateMergedPlanningBundle(bundle, plan, documentQueue) {
+  if (bundle?.schemaVersion !== 1 || bundle?.marker !== PREPARED_MERGED_MARKER ||
+    bundle.parkId !== plan.parkId || bundle.planSha256 !== sha256(plan) ||
+    bundle.documentCount !== bundle.entries?.length || bundle.entriesSha256 !== sha256(bundle.entries || [])) {
+    throw new Error("merged planning bundle failed its integrity contract");
+  }
+  const expected = documentQueue.map(planningDocumentIdentity);
+  const actual = bundle.entries.map((entry) => entry.identity);
+  if (sha256(actual) !== sha256(expected)) throw new Error("merged planning bundle order or coverage does not match the plan");
+}
+
+function validatePreparedCorroboration(entry, { document, application }) {
+  const expected = prepareAutomaticPlanningCorroboration(planningCorroborationInput(application, document));
+  if (sha256(entry.corroboration) !== sha256(expected)) {
+    throw new Error(`prepared corroboration does not match document ${document?.id || entry.identity}`);
+  }
 }
 
 export function selectPlanningShard(documentQueue, shardIndex, shardCount) {
@@ -559,41 +662,48 @@ async function processPlanningDocument(document, application, profile, options, 
     }
   } else if (sourceMime === "application/zip") {
     try {
-      const extracted = extractNativePlanningArchive({
-        bytes: sourceBytes,
-        application,
-        document,
-        profile,
-        minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
-      });
+      const { value: extracted, retries } = await retryPlanningOperation(() =>
+        extractNativePlanningArchive({
+          bytes: sourceBytes,
+          application,
+          document,
+          profile,
+          minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
+        }));
+      recordPreparationRetries(evidence, retries);
       evidence.extraction.push(compactExtraction(extracted));
       evidence.archive = extracted.archive;
       features.push(...extracted.collection.features);
     } catch (error) {
+      recordPreparationRetries(evidence, error.planningRetryCount || 0);
       failures.push(failure("planning-native-archive-extraction", document.url, error, application.reference));
     }
   } else if (isRasterPlanningDocument(sourceMime)) {
     const pageCount = await documentPageCount(sourceFile, sourceMime);
     for (let page = 1; page <= Math.min(pageCount, limits.pages); page += 1) {
       try {
-        const extracted = await extractRasterPlanningPage({
-          filename: sourceFile,
-          page,
-          workDirectory: path.join(runtime.cacheDir, "planning-extraction", profile.id, sourceHash.slice(0, 16)),
-          document: { id: document.id, sha256: sourceHash, mime: sourceMime }
+        const { value: georeferenced, retries } = await retryPlanningOperation(async () => {
+          const extracted = await extractRasterPlanningPage({
+            filename: sourceFile,
+            page,
+            workDirectory: path.join(runtime.cacheDir, "planning-extraction", profile.id, sourceHash.slice(0, 16)),
+            document: { id: document.id, sha256: sourceHash, mime: sourceMime }
+          });
+          return autoGeoreferencePlanningPage({
+            svg: extracted.svg,
+            semantic: extracted.semantic,
+            application,
+            document: { ...document, dpi: 300 },
+            profile,
+            page,
+            minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
+          });
         });
-        const georeferenced = autoGeoreferencePlanningPage({
-          svg: extracted.svg,
-          semantic: extracted.semantic,
-          application,
-          document: { ...document, dpi: 300 },
-          profile,
-          page,
-          minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
-        });
+        recordPreparationRetries(evidence, retries);
         evidence.extraction.push(compactExtraction(georeferenced));
         features.push(...georeferenced.collection.features);
       } catch (error) {
+        recordPreparationRetries(evidence, error.planningRetryCount || 0);
         failures.push(failure("planning-page-extraction", `${document.url}#page=${page}`, error, application.reference));
       }
     }
@@ -614,14 +724,34 @@ async function processPlanningDocument(document, application, profile, options, 
   return deferEligibility ? processed : finalizePlanningDocument(processed, application, document, runtime);
 }
 
-function finalizePlanningDocument(processed, application, document, runtime) {
+export async function retryPlanningOperation(operation) {
+  try {
+    return { value: await operation(), retries: 0 };
+  } catch (firstError) {
+    try {
+      return { value: await operation(), retries: 1 };
+    } catch (error) {
+      const finalError = error instanceof Error ? error : new Error(String(error));
+      finalError.planningRetryCount = 1;
+      finalError.firstAttemptMessage = firstError?.message || String(firstError);
+      throw finalError;
+    }
+  }
+}
+
+function recordPreparationRetries(evidence, retries) {
+  if (!retries) return;
+  evidence.preparationRetries = (evidence.preparationRetries || 0) + retries;
+}
+
+function finalizePlanningDocument(processed, application, document, runtime, preparedCorroboration = null) {
   const { evidence, candidateCollection, warnings } = processed;
   if (!candidateCollection) return processed;
   const features = candidateCollection.features || [];
-  const eligibility = corroborateAutomaticPlanningCollection(candidateCollection, {
-    ...application,
-    proposal: `${application.proposal || ""} ${document.title || ""} ${document.role || ""}`
-  }, runtime);
+  const input = planningCorroborationInput(application, document);
+  const eligibility = corroborateAutomaticPlanningCollection(
+    candidateCollection, input, runtime, preparedCorroboration
+  );
   evidence.worldEligible = eligibility.worldEligible && features.length > 0;
   evidence.worldEligibilityBasis = eligibility.basis;
   evidence.currentStateCorroboration = eligibility;
@@ -632,7 +762,14 @@ function finalizePlanningDocument(processed, application, document, runtime) {
   return { ...processed, collection: evidence.worldEligible ? candidateCollection : null };
 }
 
-function planningDocumentIdentity({ document, application }) {
+function planningCorroborationInput(application, document) {
+  return {
+    ...application,
+    proposal: `${application?.proposal || ""} ${document?.title || ""} ${document?.role || ""}`
+  };
+}
+
+export function planningDocumentIdentity({ document, application }) {
   return sha256(`${application?.reference || "unknown"}\n${document?.id || "unknown"}\n${document?.url || ""}`);
 }
 
@@ -647,6 +784,7 @@ function automaticResult(profile) {
     documents: [],
     collections: [],
     featureCount: 0,
+    preparedHandoff: null,
     discovery: null,
     warnings: [],
     failures: []

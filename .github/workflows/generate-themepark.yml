@@ -22,6 +22,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  quality-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run test suite off the generation critical path
+        run: npm test
+
   planning-plan:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -38,10 +51,10 @@ jobs:
       - name: Restore discovery cache
         uses: actions/cache/restore@v6
         with:
-          path: .tpmap-cache
-          key: planning-plan-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/planning-discovery
+          key: planning-discovery-v2-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           restore-keys: |
-            source-v3-${{ runner.os }}-${{ inputs.park }}-
+            planning-discovery-v2-${{ runner.os }}-${{ inputs.park }}-
       - run: npm ci
       - name: Discover and freeze the bounded planning work queue
         run: >-
@@ -54,6 +67,12 @@ jobs:
           name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: planning-plan.json
           retention-days: 1
+      - name: Save planning discovery cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .tpmap-cache/planning-discovery
+          key: planning-discovery-v2-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
   planning-extract:
     needs: planning-plan
@@ -76,6 +95,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Restore this shard's content-addressed planning cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            .tpmap-cache/planning-documents
+            .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
+          key: planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          restore-keys: |
+            planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
+            planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-
       - name: Install planning extraction tools
         run: |
           sudo apt-get update
@@ -93,21 +122,64 @@ jobs:
           --planning-shard-index ${{ matrix.shard }}
           --planning-shard-count 20
           --out .tpmap-cache/prepared-planning/shard-${{ matrix.shard }}.json
-      - name: Upload content-addressed planning shard
+      - name: Upload finalized planning shard result
         uses: actions/upload-artifact@v7
         with:
-          name: planning-cache-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          name: planning-result-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: .tpmap-cache/prepared-planning/shard-${{ matrix.shard }}.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Save this shard's content-addressed planning cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
           path: |
-            .tpmap-cache/planning-documents/**
-            .tpmap-cache/prepared-generator/planning-raster-derivatives-v1/**
-            .tpmap-cache/prepared-planning/**
-          include-hidden-files: true
+            .tpmap-cache/planning-documents
+            .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
+          key: planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+
+  planning-merge:
+    needs: [planning-plan, planning-extract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PARK_ID: ${{ inputs.park }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Download all finalized planning shard results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: planning-result-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: .tpmap-cache/prepared-planning-shards
+          merge-multiple: true
+      - name: Validate exact coverage and merge in frozen plan order
+        run: >-
+          node src/cli.mjs merge-planning
+          --park "$PARK_ID"
+          --planning-plan planning-plan.json
+          --prepared-planning-directory .tpmap-cache/prepared-planning-shards
+          --out .tpmap-cache/finalized-planning/prepared-planning.json
+      - name: Upload zero-rework planning handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: planning-finalized-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/finalized-planning/prepared-planning.json
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
 
   generate:
-    needs: [planning-plan, planning-extract]
+    needs: [quality-gate, planning-merge]
     # Set TPMAP_GENERATION_RUNNER to a configured larger-runner label (8/16+ cores)
     # without changing this workflow. Falls back to the standard hosted runner.
     runs-on: ${{ vars.TPMAP_GENERATION_RUNNER || 'ubuntu-24.04' }}
@@ -172,23 +244,14 @@ jobs:
         with:
           name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Merge all planning extraction shards
+      - name: Download validated zero-rework planning handoff
         uses: actions/download-artifact@v8
         with:
-          pattern: planning-cache-${{ github.run_id }}-${{ github.run_attempt }}-*
-          path: .tpmap-cache
-          merge-multiple: true
-
-      - name: Install geospatial and planning-drawing tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes gdal-bin poppler-utils python3-opencv tesseract-ocr
+          name: planning-finalized-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/finalized-planning
 
       - name: Install locked dependencies
         run: npm ci
-
-      - name: Run test suite
-        run: npm test
 
       - name: Check automatic-discovery configuration
         shell: bash
@@ -212,7 +275,7 @@ jobs:
             --strict
             --no-addon
             --planning-plan planning-plan.json
-            --prepared-planning-directory .tpmap-cache/prepared-planning
+            --prepared-planning-directory .tpmap-cache/finalized-planning
             --out "$OUTPUT_DIR"
           )
           node src/cli.mjs "${args[@]}"

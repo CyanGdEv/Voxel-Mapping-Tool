@@ -9,6 +9,7 @@ import { applyParkProfile, listParkProfiles, loadParkProfile } from "./lib/park-
 import { extractRasterPlanningPage } from "./lib/planning-raster-extraction.mjs";
 import {
   createAutomaticPlanningPlan,
+  mergePreparedPlanningShards,
   prepareAutomaticPlanningShard
 } from "./lib/planning-discovery.mjs";
 import { bboxCenter } from "./lib/geo.mjs";
@@ -19,6 +20,7 @@ Usage
   voxel-map build --park PARK [options]
   voxel-map planning-plan --park PARK --out planning-plan.json
   voxel-map prepare-planning --park PARK --planning-plan planning-plan.json --planning-shard-index 0 --planning-shard-count 20
+  voxel-map merge-planning --park PARK --planning-plan planning-plan.json --prepared-planning-directory DIR --out prepared-planning.json
   voxel-map parks
   voxel-map extract-plan --input DRAWING.pdf [--page 1] [--out DIRECTORY]
   voxel-map inspect --osm FILE [--bbox S,W,N,E]
@@ -58,6 +60,8 @@ Core options
   --planning-shard-index N          Zero-based extraction shard (CI preparation command)
   --planning-shard-count N          Total extraction shards; every document remains covered once
   --prepared-planning-directory DIR Reuse validated extraction-shard results during the final build
+  --allow-prepared-planning-fallback
+                                    Explicitly permit slow local re-extraction when a prepared bundle is invalid
   --planning-georef-min-confidence .72
                                     Minimum automatic drawing alignment confidence
   --planning-world-authority planning-only|fixture
@@ -322,10 +326,25 @@ async function main() {
     console.log(JSON.stringify({ svg, semantics, derivativeCache: result.derivativeCache }, null, 2));
     return;
   }
-  if (!["build", "planning-plan", "prepare-planning"].includes(command)) throw new UserError(`Unknown command: ${command}`);
+  if (!["build", "planning-plan", "prepare-planning", "merge-planning"].includes(command)) throw new UserError(`Unknown command: ${command}`);
   if (options.park) options = applyParkProfile(options, await loadParkProfile(options.park));
-  if (["planning-plan", "prepare-planning"].includes(command)) {
+  if (["planning-plan", "prepare-planning", "merge-planning"].includes(command)) {
     if (!options.parkProfile) throw new UserError(`${command} requires --park`);
+    if (command === "merge-planning") {
+      if (!options.planningPlan || !options.preparedPlanningDirectory) {
+        throw new UserError("merge-planning requires --planning-plan and --prepared-planning-directory");
+      }
+      const plan = await readJson(path.resolve(options.planningPlan));
+      const summary = await mergePreparedPlanningShards({
+        directory: options.preparedPlanningDirectory,
+        plan,
+        profile: options.parkProfile,
+        output: options.out || "prepared-planning.json"
+      });
+      const { bundle, ...compact } = summary;
+      console.log(JSON.stringify(compact, null, 2));
+      return;
+    }
     const cacheDir = path.resolve(options.cache || ".tpmap-cache");
     await ensureDir(cacheDir);
     const contact = options.contact || process.env.TPMAP_CONTACT;

@@ -81,6 +81,7 @@ export function compactPlanningEvidence(planning) {
     parkId: planning.parkId || null,
     status: planning.status,
     featureCount: planning.featureCount,
+    preparedHandoff: planning.preparedHandoff || null,
     manifests: planning.manifests,
     discovery: planning.discovery || null,
     applications: (planning.applications || []).map((application) => ({
