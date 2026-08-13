@@ -12,6 +12,7 @@ import {
 } from "../src/lib/planning-auto-georeference.mjs";
 import {
   acquireAutomaticPlanningEvidence,
+  createPlanningExtractionScheduler,
   discoverPlanningApplications,
   loadPreparedPlanningDocuments,
   mergePreparedPlanningShardBundles,
@@ -56,6 +57,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 
 test("production GitHub Action requires only a park selection", async () => {
   const workflow = await readFile(path.join(repositoryRoot, ".github/workflows/generate-themepark.yml"), "utf8");
+  const consolidation = await readFile(path.join(repositoryRoot, ".github/workflows/consolidate-planning-corpus.yml"), "utf8");
   const inputs = workflow.match(/inputs:\n([\s\S]*?)\n\npermissions:/)?.[1] || "";
   assert.match(inputs, /^\s{6}park:/m);
   assert.doesNotMatch(inputs, /planning_manifest|strict:/);
@@ -69,10 +71,10 @@ test("production GitHub Action requires only a park selection", async () => {
     "source cache restore, save and corpus migration keys must be unique for every retry attempt");
   assert.match(workflow, /max-parallel: 20/);
   assert.match(workflow, /planning-shard-count 20/);
-  assert.match(workflow, /merge-multiple: true/);
   assert.match(workflow, /--planning-plan planning-plan\.json/);
   assert.match(workflow, /quality-gate:/);
   assert.match(workflow, /merge-planning/);
+  assert.doesNotMatch(workflow, /^  planning-merge:/m);
   assert.match(workflow, /planning-result-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /planning-finalized-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /planning-discovery-v2-/);
@@ -82,15 +84,29 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(workflow, /Restore the legacy park-wide source cache for one-time corpus migration/);
   assert.match(workflow, /TPMAP_PLANNING_CORPUS_DIR: \.tpmap-cache\/planning-corpus/);
   assert.match(workflow, /Upload this shard's raw planning-document delta/);
-  assert.match(workflow, /Consolidate every shard's raw planning-document delta/);
+  assert.match(workflow, /Configure bounded page-level extraction parallelism/);
+  assert.match(workflow, /TPMAP_PLANNING_WORKERS=\$workers/);
+  assert.match(workflow, /apt-get install --yes --no-install-recommends/);
   assert.match(workflow, /Save this shard's content-addressed planning cache/);
+  assert.match(workflow, /Await and download exact planning shard coverage/);
+  assert.match(workflow, /node scripts\/await-planning-results\.mjs/);
   assert.match(workflow, /--prepared-planning-directory \.tpmap-cache\/finalized-planning/);
   assert.match(workflow, /\.tpmap-cache\/prepared-planning\/shard-\$\{\{ matrix\.shard \}\}\.json/);
   assert.doesNotMatch(workflow, /--allow-prepared-planning-fallback/);
   const generateJob = workflow.split("\n  generate:\n")[1] || "";
+  assert.match(generateJob, /needs: \[quality-gate, planning-plan, planning-corpus\]/);
+  assert.doesNotMatch(generateJob, /needs:.*planning-extract|needs:.*planning-merge/);
+  assert.doesNotMatch(generateJob, /Download frozen planning work queue/);
   assert.doesNotMatch(generateJob, /planning-cache-/);
   assert.doesNotMatch(generateJob, /sudo apt-get install.*(?:poppler|tesseract)/);
   assert.doesNotMatch(generateJob, /run: npm test/);
+  assert.match(consolidation, /workflow_run:/);
+  assert.match(workflow, /planning-corpus\/\.park-id/);
+  assert.match(consolidation, /planning-corpus\/\.park-id/);
+  assert.match(consolidation, /Consolidate content-addressed documents without changing evidence bytes/);
+  assert.match(consolidation, /planning-documents-\$\{\{ github\.event\.workflow_run\.id \}\}/);
+  assert.match(consolidation, /merge-multiple: true/);
+  assert.match(consolidation, /planning-corpus-v1-/);
 });
 
 test("a shard seeds its active document cache from the shared park corpus", async () => {
@@ -117,6 +133,28 @@ test("parallel planning shards cover every document exactly once", () => {
   assert.ok(shards.every((shard) => shard.length === 8));
   assert.deepEqual(shards.flat().map((item) => item.index).sort((a, b) => a - b),
     queue.map((item) => item.index));
+});
+
+test("page-level planning work uses every bounded worker without oversubscription", async () => {
+  const scheduler = createPlanningExtractionScheduler(3);
+  let active = 0;
+  let maximumActive = 0;
+  const completionOrder = [];
+  const results = await Promise.all(Array.from({ length: 9 }, (_, index) => scheduler.run(async () => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise((resolve) => setTimeout(resolve, (9 - index) % 4));
+    completionOrder.push(index);
+    active -= 1;
+    return index;
+  })));
+  assert.equal(maximumActive, 3);
+  assert.deepEqual(results, Array.from({ length: 9 }, (_, index) => index));
+  assert.equal(new Set(completionOrder).size, 9);
+
+  const recovery = createPlanningExtractionScheduler(1);
+  await assert.rejects(recovery.run(async () => { throw new Error("bounded task failed"); }), /bounded task failed/);
+  assert.equal(await recovery.run(async () => "next task ran"), "next task ran");
 });
 
 test("prepared planning shards merge once in frozen plan order with exact integrity", () => {

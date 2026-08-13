@@ -1,6 +1,7 @@
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
+import { availableParallelism } from "node:os";
 import { promisify } from "node:util";
 import { copyFile, readFile, readdir, rm } from "node:fs/promises";
 import { cachedBinary, cachedJson, ensureDir, exists, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
@@ -31,6 +32,7 @@ const MAX_PAGES_HARD = 50;
 const MAX_PLANIT_CANDIDATE_SCAN = 600;
 const APPLICATION_CRAWL_CONCURRENCY = 4;
 const DOCUMENT_PROCESS_CONCURRENCY = 4;
+const MAX_PLANNING_EXTRACTION_WORKERS = 8;
 export const PREPARED_SHARD_MARKER = "TPMAP_PREPARED_PLANNING_SHARD_V2";
 export const PREPARED_MERGED_MARKER = "TPMAP_PREPARED_PLANNING_MERGED_V1";
 const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
@@ -49,7 +51,8 @@ export async function acquireAutomaticPlanningEvidence(options, runtime) {
 
   const planningRuntime = {
     ...runtime,
-    planningPortalHealth: runtime.planningPortalHealth || new Map()
+    planningPortalHealth: runtime.planningPortalHealth || new Map(),
+    planningExtractionScheduler: runtime.planningExtractionScheduler || createPlanningExtractionScheduler()
   };
   const plan = options.planningPlan
     ? await readJson(path.resolve(options.planningPlan))
@@ -105,12 +108,20 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
   const shardIndex = Number(options.planningShardIndex ?? 0);
   const queue = selectPlanningShard(plan.documentQueue, shardIndex, shardCount);
   const limits = discoveryLimits(options);
+  const planningRuntime = {
+    ...runtime,
+    planningExtractionScheduler: runtime.planningExtractionScheduler || createPlanningExtractionScheduler()
+  };
+  const documentConcurrency = Math.max(
+    DOCUMENT_PROCESS_CONCURRENCY,
+    Math.min(queue.length, planningRuntime.planningExtractionScheduler.concurrency * 2)
+  );
   let processed = 0, acquired = 0, rawDocumentCacheHits = 0, sharedPlanningCorpusHits = 0, pageResults = 0;
   const failures = [];
-  const entries = await mapLimit(queue, DOCUMENT_PROCESS_CONCURRENCY, async ({ document, application }) => {
-    let value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
+  const entries = await mapLimit(queue, documentConcurrency, async ({ document, application }) => {
+    let value = await processPlanningDocument(document, application, options.parkProfile, options, planningRuntime, limits, true);
     if (!value.evidence.acquired) {
-      value = await processPlanningDocument(document, application, options.parkProfile, options, runtime, limits, true);
+      value = await processPlanningDocument(document, application, options.parkProfile, options, planningRuntime, limits, true);
       value.evidence.preparationRetries = (value.evidence.preparationRetries || 0) + 1;
     }
     processed += 1;
@@ -119,7 +130,7 @@ export async function prepareAutomaticPlanningShard(plan, options, runtime) {
     if (value.evidence.cacheSource === "shared-planning-corpus") sharedPlanningCorpusHits += 1;
     pageResults += value.evidence.extraction.length;
     failures.push(...value.failures);
-    emitProgress(runtime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
+    emitProgress(planningRuntime, `Planning shard ${shardIndex + 1}/${shardCount}: ${processed}/${queue.length} document(s)`);
     return {
       identity: planningDocumentIdentity({ document, application }),
       evidence: value.evidence,
@@ -695,7 +706,8 @@ async function processPlanningDocument(document, application, profile, options, 
     }
   } else if (isRasterPlanningDocument(sourceMime)) {
     const pageCount = await documentPageCount(sourceFile, sourceMime);
-    for (let page = 1; page <= Math.min(pageCount, limits.pages); page += 1) {
+    const pages = Array.from({ length: Math.min(pageCount, limits.pages) }, (_, index) => index + 1);
+    const pageResults = await Promise.all(pages.map((page) => schedulePlanningExtraction(runtime, async () => {
       try {
         const { value: georeferenced, retries } = await retryPlanningOperation(async () => {
           const extracted = await extractRasterPlanningPage({
@@ -714,13 +726,26 @@ async function processPlanningDocument(document, application, profile, options, 
             minimumConfidence: Number(options.planningGeorefMinConfidence || 0.72)
           });
         });
-        recordPreparationRetries(evidence, retries);
-        evidence.extraction.push(compactExtraction(georeferenced));
-        features.push(...georeferenced.collection.features);
+        return { page, georeferenced, retries, error: null };
       } catch (error) {
-        recordPreparationRetries(evidence, error.planningRetryCount || 0);
-        failures.push(failure("planning-page-extraction", `${document.url}#page=${page}`, error, application.reference));
+        return { page, georeferenced: null, retries: error.planningRetryCount || 0, error };
       }
+    })));
+    // Promise.all preserves page order. Commit results only here so concurrency
+    // cannot change evidence hashes, feature order, or failure ordering.
+    for (const result of pageResults) {
+      recordPreparationRetries(evidence, result.retries);
+      if (result.error) {
+        failures.push(failure(
+          "planning-page-extraction",
+          `${document.url}#page=${result.page}`,
+          result.error,
+          application.reference
+        ));
+        continue;
+      }
+      evidence.extraction.push(compactExtraction(result.georeferenced));
+      features.push(...result.georeferenced.collection.features);
     }
   } else {
     evidence.extraction.push({
@@ -762,6 +787,43 @@ export async function seedPlanningDocumentFromCorpus({
     if (error?.code === "EEXIST") return false;
     throw error;
   }
+}
+
+export function resolvePlanningExtractionWorkerCount(value = process.env.TPMAP_PLANNING_WORKERS) {
+  const requested = Number(value);
+  const available = availableParallelism();
+  const workers = Number.isInteger(requested) && requested > 0 ? requested : available;
+  return Math.max(1, Math.min(workers, available, MAX_PLANNING_EXTRACTION_WORKERS));
+}
+
+export function createPlanningExtractionScheduler(concurrency = resolvePlanningExtractionWorkerCount()) {
+  const limit = Math.max(1, Math.min(Number(concurrency) || 1, MAX_PLANNING_EXTRACTION_WORKERS));
+  const queue = [];
+  let active = 0;
+  const drain = () => {
+    while (active < limit && queue.length) {
+      const entry = queue.shift();
+      active += 1;
+      Promise.resolve().then(entry.task).then(entry.resolve, entry.reject).finally(() => {
+        active -= 1;
+        drain();
+      });
+    }
+  };
+  return {
+    concurrency: limit,
+    run(task) {
+      if (typeof task !== "function") return Promise.reject(new TypeError("planning extraction task must be a function"));
+      return new Promise((resolve, reject) => {
+        queue.push({ task, resolve, reject });
+        drain();
+      });
+    }
+  };
+}
+
+function schedulePlanningExtraction(runtime, task) {
+  return runtime.planningExtractionScheduler?.run(task) || task();
 }
 
 export async function retryPlanningOperation(operation) {

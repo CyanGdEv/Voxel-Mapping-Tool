@@ -15,6 +15,7 @@ on:
           - drayton-manor-resort
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -78,6 +79,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
+      PARK_ID: ${{ inputs.park }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
@@ -105,6 +107,7 @@ jobs:
           if [ -d .tpmap-cache/planning-documents ]; then
             cp -a -n .tpmap-cache/planning-documents/. .tpmap-cache/planning-corpus/
           fi
+          printf '%s\n' "$PARK_ID" > .tpmap-cache/planning-corpus/.park-id
           touch .tpmap-cache/planning-corpus/.corpus-ready
           find .tpmap-cache/planning-corpus -type f -printf '.' | wc -c
       - name: Upload the reusable raw planning corpus once for all shards
@@ -139,6 +142,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Configure bounded page-level extraction parallelism
+        shell: bash
+        run: |
+          set -euo pipefail
+          workers="$(nproc)"
+          if [ "$workers" -gt 8 ]; then workers=8; fi
+          echo "TPMAP_PLANNING_WORKERS=$workers" >> "$GITHUB_ENV"
+          echo "Planning extraction worker budget: $workers"
       - name: Download the prior park-wide planning corpus
         uses: actions/download-artifact@v8
         with:
@@ -154,10 +165,24 @@ jobs:
           restore-keys: |
             planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
             planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-
-      - name: Install planning extraction tools
+      - name: Ensure planning extraction tools are available
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes poppler-utils python3-opencv tesseract-ocr
+          set -euo pipefail
+          if command -v pdftocairo >/dev/null && command -v pdfinfo >/dev/null && \
+             command -v tesseract >/dev/null && python3 -c 'import cv2' >/dev/null 2>&1; then
+            echo "Planning extraction tools are already present on the runner"
+            exit 0
+          fi
+          packages=(poppler-utils python3-opencv tesseract-ocr)
+          if ! sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends "${packages[@]}"; then
+            sudo apt-get update
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends "${packages[@]}"
+          fi
+          command -v pdftocairo >/dev/null
+          command -v pdfinfo >/dev/null
+          command -v tesseract >/dev/null
+          python3 -c 'import cv2'
       - run: npm ci
       - uses: actions/download-artifact@v8
         with:
@@ -202,64 +227,10 @@ jobs:
             .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
           key: planning-shard-v2-${{ runner.os }}-${{ inputs.park }}-${{ matrix.shard }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
-  planning-merge:
-    needs: [planning-plan, planning-extract]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    env:
-      PARK_ID: ${{ inputs.park }}
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - uses: actions/download-artifact@v8
-        with:
-          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Download all finalized planning shard results
-        uses: actions/download-artifact@v8
-        with:
-          pattern: planning-result-${{ github.run_id }}-${{ github.run_attempt }}-*
-          path: .tpmap-cache/prepared-planning-shards
-          merge-multiple: true
-      - name: Restore the input planning corpus
-        uses: actions/download-artifact@v8
-        with:
-          name: planning-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .tpmap-cache/planning-corpus
-      - name: Consolidate every shard's raw planning-document delta
-        uses: actions/download-artifact@v8
-        with:
-          pattern: planning-documents-${{ github.run_id }}-${{ github.run_attempt }}-*
-          path: .tpmap-cache/planning-corpus/${{ inputs.park }}
-          merge-multiple: true
-      - name: Validate exact coverage and merge in frozen plan order
-        run: >-
-          node src/cli.mjs merge-planning
-          --park "$PARK_ID"
-          --planning-plan planning-plan.json
-          --prepared-planning-directory .tpmap-cache/prepared-planning-shards
-          --out .tpmap-cache/finalized-planning/prepared-planning.json
-      - name: Upload zero-rework planning handoff
-        uses: actions/upload-artifact@v7
-        with:
-          name: planning-finalized-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .tpmap-cache/finalized-planning/prepared-planning.json
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 1
-      - name: Save the consolidated planning-document corpus
-        if: always()
-        uses: actions/cache/save@v6
-        with:
-          path: .tpmap-cache/planning-corpus
-          key: planning-corpus-v1-${{ runner.os }}-${{ inputs.park }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}-final
-
   generate:
-    needs: [quality-gate, planning-merge]
+    # Start alongside the extraction matrix and wait on its exact artifacts.
+    # This removes the observed five-minute post-matrix scheduling barrier.
+    needs: [quality-gate, planning-plan, planning-corpus]
     # Set TPMAP_GENERATION_RUNNER to a configured larger-runner label (8/16+ cores)
     # without changing this workflow. Falls back to the standard hosted runner.
     runs-on: ${{ vars.TPMAP_GENERATION_RUNNER || 'ubuntu-24.04' }}
@@ -272,6 +243,7 @@ jobs:
       TPMAP_CONTACT: ${{ secrets.TPMAP_CONTACT || format('{0}/{1}', github.server_url, github.repository) }}
       TPMAP_SHARED_CACHE_DIR: .tpmap-cache
       TPMAP_PLANNING_DERIVATIVE_CACHE_DIR: .tpmap-cache/prepared-generator/planning-raster-derivatives-v1
+      GITHUB_TOKEN: ${{ github.token }}
       # Configure these once; workflow users still only choose a park.
       OS_NGD_API_KEY: ${{ secrets.OS_NGD_API_KEY }}
       TPMAP_TREE_SPECIES_MAP_URL: ${{ vars.TPMAP_TREE_SPECIES_MAP_URL }}
@@ -319,19 +291,35 @@ jobs:
             source-v3-${{ runner.os }}-${{ inputs.park }}-${{ hashFiles('config/parks/*.json', 'src/lib/*.mjs', 'src/tools/planning_raster_vectorize.py') }}-
             source-v3-${{ runner.os }}-${{ inputs.park }}-
 
-      - name: Download frozen planning work queue
-        uses: actions/download-artifact@v8
-        with:
-          name: planning-plan-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Download validated zero-rework planning handoff
-        uses: actions/download-artifact@v8
-        with:
-          name: planning-finalized-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .tpmap-cache/finalized-planning
-
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Await and download exact planning shard coverage
+        run: >-
+          node scripts/await-planning-results.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --expected 20
+          --plan-out planning-plan.json
+          --out .tpmap-cache/prepared-planning-shards
+
+      - name: Validate exact coverage and merge in frozen plan order
+        run: >-
+          node src/cli.mjs merge-planning
+          --park "$PARK_ID"
+          --planning-plan planning-plan.json
+          --prepared-planning-directory .tpmap-cache/prepared-planning-shards
+          --out .tpmap-cache/finalized-planning/prepared-planning.json
+
+      - name: Upload zero-rework planning handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: planning-finalized-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tpmap-cache/finalized-planning/prepared-planning.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Check automatic-discovery configuration
         shell: bash
