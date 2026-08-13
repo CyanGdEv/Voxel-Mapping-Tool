@@ -453,10 +453,11 @@ function summarizeTopology(features) {
     disjointMultipolygons: 0
   };
   for (const feature of features) {
-    if (feature.source.elementType === "relation") summary.relationFeatures += 1;
-    const polygons = feature.geometry.type === "Polygon"
-      ? [feature.geometry.coordinates]
-      : feature.geometry.type === "MultiPolygon" ? feature.geometry.coordinates : [];
+    if (feature?.source?.elementType === "relation") summary.relationFeatures += 1;
+    const geometry = feature?.geometry;
+    const polygons = geometry?.type === "Polygon"
+      ? [geometry.coordinates]
+      : geometry?.type === "MultiPolygon" ? geometry.coordinates : [];
     if (!polygons.length) continue;
     summary.polygonFeatures += 1;
     summary.polygonParts += polygons.length;
@@ -477,16 +478,17 @@ function summarizeExplicitSemantics(features) {
     mappedMainEntrances: 0
   };
   for (const feature of features) {
-    if (feature.tags.bridge && feature.tags.bridge !== "no") summary.bridges += 1;
-    if (feature.tags.tunnel && feature.tags.tunnel !== "no") summary.tunnels += 1;
-    const layer = Number(feature.tags.layer);
+    const tags = feature?.tags || {};
+    if (tags.bridge && tags.bridge !== "no") summary.bridges += 1;
+    if (tags.tunnel && tags.tunnel !== "no") summary.tunnels += 1;
+    const layer = Number(tags.layer);
     if (Number.isFinite(layer)) {
       summary.layered += 1;
       if (layer > 0) summary.positiveLayers += 1;
       if (layer < 0) summary.negativeLayers += 1;
     }
-    if (feature.tags.entrance || feature.tags.door) summary.mappedEntrances += 1;
-    if (feature.tags.entrance === "main") summary.mappedMainEntrances += 1;
+    if (tags.entrance || tags.door) summary.mappedEntrances += 1;
+    if (tags.entrance === "main") summary.mappedMainEntrances += 1;
   }
   return summary;
 }
@@ -506,7 +508,7 @@ export function toGeoJson(feature) {
   return {
     type: "Feature",
     id: feature.id,
-    geometry: feature.geometry,
+    geometry: feature?.geometry ?? null,
     properties: {
       id: feature.id,
       name: feature.name,
