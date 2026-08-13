@@ -25,6 +25,7 @@
 - A missing elevation stays null until planning, survey, DTM/DSM or traceable interpolation resolves it.
 - Interpolation is bounded between compatible ride anchors; no end extrapolation is performed.
 - Prepared planning handoff requires exact plan hash, shard coverage, unique document identities, frozen ordering and payload hash; generation performs zero planning downloads or extraction retries unless an expert explicitly enables the slow fallback.
+- Raw official planning documents are restored from one park-wide content-addressed corpus before sharding. Each shard copies only its assigned corpus hits into its active cache, then the merge job consolidates all shard deltas for later runs; a transient authority outage cannot discard evidence acquired by an earlier run.
 - Ride track output is exactly one block wide. Banking and cross ties are outside the representation.
 - Missing or partial ride elevation remains a reported high-severity limitation and keeps the build out of the exact-3D class, but it does not block source-faithful one-block plan centrelines. Explicit tunnel-height, profile-alignment and detected-attachment evidence gates still fail closed.
 - Supports and ride attachments retain detected planning geometry; no spacing, mirroring or side-offset prior creates missing features.

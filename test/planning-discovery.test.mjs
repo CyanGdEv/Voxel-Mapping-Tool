@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +19,7 @@ import {
   PREPARED_MERGED_MARKER,
   PREPARED_SHARD_MARKER,
   retryPlanningOperation,
+  seedPlanningDocumentFromCorpus,
   selectPlanningShard
 } from "../src/lib/planning-discovery.mjs";
 import {
@@ -64,8 +65,8 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.doesNotMatch(workflow, /--planning-manifest/);
   assert.match(workflow, /secrets\.TPMAP_CONTACT \|\| format\(/);
   assert.doesNotMatch(workflow, /Configure the TPMAP_CONTACT repository secret/);
-  assert.equal((workflow.match(/key: source-v3-[^\n]*github\.run_attempt/g) || []).length, 2,
-    "source cache restore and save keys must be unique for every retry attempt");
+  assert.equal((workflow.match(/key: source-v3-[^\n]*github\.run_attempt/g) || []).length, 3,
+    "source cache restore, save and corpus migration keys must be unique for every retry attempt");
   assert.match(workflow, /max-parallel: 20/);
   assert.match(workflow, /planning-shard-count 20/);
   assert.match(workflow, /merge-multiple: true/);
@@ -76,6 +77,12 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.match(workflow, /planning-finalized-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /planning-discovery-v2-/);
   assert.match(workflow, /planning-shard-v2-/);
+  assert.match(workflow, /planning-corpus:/);
+  assert.match(workflow, /planning-corpus-v1-/);
+  assert.match(workflow, /Restore the legacy park-wide source cache for one-time corpus migration/);
+  assert.match(workflow, /TPMAP_PLANNING_CORPUS_DIR: \.tpmap-cache\/planning-corpus/);
+  assert.match(workflow, /Upload this shard's raw planning-document delta/);
+  assert.match(workflow, /Consolidate every shard's raw planning-document delta/);
   assert.match(workflow, /Save this shard's content-addressed planning cache/);
   assert.match(workflow, /--prepared-planning-directory \.tpmap-cache\/finalized-planning/);
   assert.match(workflow, /\.tpmap-cache\/prepared-planning\/shard-\$\{\{ matrix\.shard \}\}\.json/);
@@ -84,6 +91,24 @@ test("production GitHub Action requires only a park selection", async () => {
   assert.doesNotMatch(generateJob, /planning-cache-/);
   assert.doesNotMatch(generateJob, /sudo apt-get install.*(?:poppler|tesseract)/);
   assert.doesNotMatch(generateJob, /run: npm test/);
+});
+
+test("a shard seeds its active document cache from the shared park corpus", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "tpmap-planning-corpus-"));
+  const corpusDir = path.join(directory, "corpus");
+  const cacheDir = path.join(directory, "active");
+  const url = "https://planning.example/existing-layout.pdf";
+  const basename = `${sha256(url)}.pdf`;
+  await mkdir(path.join(corpusDir, profile.id), { recursive: true });
+  await writeFile(path.join(corpusDir, profile.id, basename), "official planning bytes");
+
+  assert.equal(await seedPlanningDocumentFromCorpus({
+    cacheDir, corpusDir, profileId: profile.id, url, extension: ".pdf"
+  }), true);
+  assert.equal(await readFile(path.join(cacheDir, basename), "utf8"), "official planning bytes");
+  assert.equal(await seedPlanningDocumentFromCorpus({
+    cacheDir, corpusDir, profileId: profile.id, url, extension: ".pdf"
+  }), false);
 });
 
 test("parallel planning shards cover every document exactly once", () => {
