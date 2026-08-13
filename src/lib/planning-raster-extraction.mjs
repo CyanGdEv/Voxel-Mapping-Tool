@@ -47,17 +47,27 @@ export async function extractRasterPlanningPage({ filename, page = 1, workDirect
     maxBuffer: 8 * 1024 * 1024
   });
   const svg = await readFile(output, "utf8");
-  const [primaryText, redText] = await Promise.all([
-    extractRasterTextObservations(image),
-    extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })
-  ]);
+
+  // Born-digital planning PDFs already contain exact title-block and annotation text.
+  // Prefer that source to a 10k x 7k full-page OCR pass; retain red-mask OCR for
+  // colour-specific construction/exclusion labels. Scanned PDFs fall back to OCR.
+  const nativeText = String(document.mime || "") === "application/pdf"
+    ? await extractNativePdfTextObservations(filename, page, svg)
+    : { anchors: [], lines: [], source: "not-pdf" };
+  const nativeUsable = nativeText.lines.length >= 3;
+  const [primaryText, redText] = nativeUsable
+    ? [nativeText, await extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })]
+    : await Promise.all([
+        extractRasterTextObservations(image),
+        extractRasterTextObservations(redOcr, { coordinateScale: 0.5, minimumConfidence: 20 })
+      ]);
   const anchors = mergeOcrAnchors(primaryText.anchors, redText.anchors);
   const rawLines = mergeRawLines(primaryText.lines, redText.lines);
   const semantic = {
     anchors,
     rawLines,
     scaleCandidates: detectPlanningScales(rawLines.map((line) => line.text).join("\n")),
-    source: "tesseract-tsv"
+    source: nativeUsable ? "pdftotext-bbox+tesseract-red-tsv" : "tesseract-tsv"
   };
   if (cache) await writeCachedDerivative(cache, { svg, semantic });
   return {
@@ -125,6 +135,7 @@ async function computePlanningRasterBehaviorDigest() {
   }
   for (const [command, args] of [
     ["pdftocairo", ["-v"]],
+    ["pdftotext", ["-v"]],
     ["tesseract", ["--version"]],
     ["python3", ["-c", "import cv2,sys; print(sys.version.split()[0]); print(cv2.__version__)"]]
   ]) {
@@ -232,6 +243,71 @@ export async function extractRasterTextObservations(filename, options = {}) {
   }
 }
 
+async function extractNativePdfTextObservations(filename, page, svg) {
+  try {
+    const { stdout } = await execFileAsync("pdftotext", [
+      "-bbox-layout", "-f", String(page), "-l", String(page), filename, "-"
+    ], {
+      timeout: 30_000,
+      maxBuffer: 64 * 1024 * 1024,
+      encoding: "utf8"
+    });
+    const { width, height } = svgDimensions(svg);
+    return parsePdftotextBboxObservations(stdout, { width, height });
+  } catch {
+    return { anchors: [], lines: [], source: "pdftotext-bbox-unavailable" };
+  }
+}
+
+export function parsePdftotextBboxObservations(value, target = {}) {
+  const source = String(value || "");
+  const pageMatch = source.match(/<page\b([^>]*)>([\s\S]*?)<\/page>/i);
+  if (!pageMatch) return { anchors: [], lines: [], source: "pdftotext-bbox-empty" };
+  const pageAttributes = parseXmlAttributes(pageMatch[1]);
+  const pageWidth = Number(pageAttributes.width);
+  const pageHeight = Number(pageAttributes.height);
+  const targetWidth = Number(target.width);
+  const targetHeight = Number(target.height);
+  if (![pageWidth, pageHeight, targetWidth, targetHeight].every((number) => Number.isFinite(number) && number > 0)) {
+    return { anchors: [], lines: [], source: "pdftotext-bbox-invalid-dimensions" };
+  }
+  const scaleX = targetWidth / pageWidth;
+  const scaleY = targetHeight / pageHeight;
+  const rawLines = [];
+  let match;
+  const linePattern = /<line\b([^>]*)>([\s\S]*?)<\/line>/gi;
+  while ((match = linePattern.exec(pageMatch[2]))) {
+    const attributes = parseXmlAttributes(match[1]);
+    const xMin = Number(attributes.xmin) * scaleX;
+    const yMin = Number(attributes.ymin) * scaleY;
+    const xMax = Number(attributes.xmax) * scaleX;
+    const yMax = Number(attributes.ymax) * scaleY;
+    if (![xMin, yMin, xMax, yMax].every(Number.isFinite)) continue;
+    const words = [];
+    let word;
+    const wordPattern = /<word\b[^>]*>([\s\S]*?)<\/word>/gi;
+    while ((word = wordPattern.exec(match[2]))) {
+      const text = decodeXml(String(word[1] || "").replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+      if (text) words.push(text);
+    }
+    const text = words.join(" ").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    rawLines.push({
+      text,
+      xMin, yMin, xMax, yMax,
+      cx: (xMin + xMax) / 2,
+      cy: (yMin + yMax) / 2,
+      ocrConfidence: 0.995,
+      textSource: "native-pdf-text"
+    });
+  }
+  const anchors = rawLines.flatMap((line) => {
+    const semantic = classifyComprehensivePlanningLabel(line.text);
+    return semantic ? [{ ...line, semantic }] : [];
+  });
+  return { anchors, lines: rawLines, source: "pdftotext-bbox" };
+}
+
 export function parseTesseractTsv(value, options = {}) {
   return parseTesseractTsvObservations(value, options).anchors;
 }
@@ -300,6 +376,33 @@ function mergeRawLines(...groups) {
     lines.push(line);
   }
   return lines;
+}
+
+function svgDimensions(svg) {
+  const source = String(svg || "");
+  const viewBox = source.match(/viewBox=["']\s*[\d.+-]+\s+[\d.+-]+\s+([\d.+-]+)\s+([\d.+-]+)\s*["']/i);
+  const width = Number(viewBox?.[1] || source.match(/<svg\b[^>]*\bwidth=["']([\d.]+)/i)?.[1]);
+  const height = Number(viewBox?.[2] || source.match(/<svg\b[^>]*\bheight=["']([\d.]+)/i)?.[1]);
+  return { width, height };
+}
+
+function parseXmlAttributes(value) {
+  const attributes = {};
+  let match;
+  const pattern = /([:\w-]+)\s*=\s*(["'])(.*?)\2/g;
+  while ((match = pattern.exec(String(value || "")))) attributes[match[1].toLowerCase()] = decodeXml(match[3]);
+  return attributes;
+}
+
+function decodeXml(value) {
+  return String(value || "")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, decimal) => String.fromCodePoint(Number(decimal)))
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'");
 }
 
 function positiveInteger(value, fallback) {

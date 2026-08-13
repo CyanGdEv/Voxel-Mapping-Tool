@@ -69,7 +69,7 @@ export async function acquireSources(options, progress = () => {}) {
   ]);
   progress("Discovering, downloading, and extracting official planning evidence");
   const planning = await acquirePlanningEvidence(options, {
-    bbox, center, cacheDir, userAgent, elevation, orthophoto, supplemental, progress
+    bbox, center, cacheDir, userAgent, osm, elevation, orthophoto, supplemental, progress
   });
   return {
     parkName: options.parkName || geocoder?.displayName?.split(",")[0] || "Theme Park",
