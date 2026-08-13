@@ -2,6 +2,8 @@
 
 const PLANNING_ONLY = "planning-only";
 const INDEPENDENT_WORLD_KINDS = new Set(["vegetation", "water", "terrain_detail"]);
+const POSTCODE = /\b(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+const DRAWING_METADATA = /\b(?:drawing\s*(?:no|number)|revision|drawn\s+by|checked\s+by|approved\s+by|client|architect|consultant|project\s+title|sheet\s+(?:no|number|size)|telephone|phone|email|www\.)\b/i;
 
 export function applyPlanningWorldAuthority(features, options = {}) {
   const mode = String(options.planningWorldAuthority || "fixture").toLowerCase();
@@ -19,6 +21,8 @@ export function applyPlanningWorldAuthority(features, options = {}) {
     otherOsmDerivedFeaturesRemoved: 0,
     nonPlanningGeometryRemoved: 0,
     explicitlyExcludedFeaturesRemoved: 0,
+    planningSpatialOutliersRemoved: 0,
+    planningSpatialOutlierReasons: {},
     zeroOsmWorldFeatures: false
   };
   if (mode !== PLANNING_ONLY) return evidence;
@@ -38,6 +42,13 @@ export function applyPlanningWorldAuthority(features, options = {}) {
     }
     discardInheritedOsmVerticalEvidence(feature);
     if (isPlanningWorldFeature(feature)) {
+      const spatialOutlier = automaticPlanningSpatialOutlier(feature);
+      if (spatialOutlier) {
+        evidence.planningSpatialOutliersRemoved += 1;
+        evidence.planningSpatialOutlierReasons[spatialOutlier] =
+          (evidence.planningSpatialOutlierReasons[spatialOutlier] || 0) + 1;
+        continue;
+      }
       evidence.planningFeaturesRetained += 1;
     } else if (INDEPENDENT_WORLD_KINDS.has(feature.kind)) {
       evidence.independentFeaturesRetained += 1;
@@ -65,6 +76,23 @@ function excludedFromWorld(feature) {
     (semantic.includes("fence") || tags.barrier === "fence") &&
     (colour.includes("red") || colour === "#ff0000" || colour === "#f00")
   );
+}
+
+function automaticPlanningSpatialOutlier(feature) {
+  const tags = feature?.tags || {};
+  if (tags.planning_auto_extracted !== true) return null;
+  const label = String(tags.planning_semantic_label || feature?.name || "").replace(/\s+/g, " ").trim();
+  if (POSTCODE.test(label)) return "title-block-postcode-label";
+  if (DRAWING_METADATA.test(label)) return "drawing-metadata-label";
+  if (/\b(?:road|street|lane|avenue|drive|close|court|house)\b/i.test(label) && /[,\d]/.test(label) && label.length > 18) {
+    return "title-block-address-label";
+  }
+
+  const bounds = boundsOf([feature.localGeometry]);
+  if (!bounds) return "invalid-local-geometry";
+  const spanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ);
+  if (["building", "structure"].includes(feature.kind) && spanM > 250) return "implausible-building-span";
+  return null;
 }
 
 export function planningWorldBoundary(features, parkName) {
