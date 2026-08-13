@@ -43,6 +43,7 @@
     "pathDiscoveryMode": "qa",
     "rideTerrainMode": "evidence",
     "maxCells": 8000000,
-    "maxWorldChunks": 24000
+    "maxWorldChunks": 24000,
+    "baseY": 32
   }
 }
