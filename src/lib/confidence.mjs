@@ -74,8 +74,14 @@ export function assessAccuracy(map, sources, options = {}) {
   const gaps = [];
   if (!map.boundary.verified) gaps.push({ severity: "critical", code: "BOUNDARY_UNVERIFIED", message: "No verified park polygon was found." });
   if (!tracks.length) gaps.push({ severity: "high", code: "RIDE_TRACKS_ABSENT", message: "No roller-coaster track centreline was found in public map data." });
-  else if (!rideVerticalCoverage) gaps.push({ severity: "critical", code: "RIDE_VERTICAL_GEOMETRY_ABSENT", message: "Ride tracks have public plan geometry but no measured or verified elevation profile." });
-  else if (rideVerticalCoverage < 0.999) gaps.push({ severity: "critical", code: "RIDE_VERTICAL_GEOMETRY_PARTIAL", message: `Measured/verified ride elevation covers ${(rideVerticalCoverage * 100).toFixed(1)}% of mapped track length; remaining sections stay visibly 2D-only except explicitly tunnel-tagged gaps may use disclosed terrain-constrained inference when enabled.` });
+  else if (!rideVerticalCoverage) gaps.push({
+    severity: "high", code: "RIDE_VERTICAL_GEOMETRY_ABSENT",
+    message: "Ride tracks retain their public plan geometry as one-block centrelines, but no measured or verified elevation profile is available; they remain visibly 2D/terrain-anchored and are not claimed as verified 3D."
+  });
+  else if (rideVerticalCoverage < 0.999) gaps.push({
+    severity: "high", code: "RIDE_VERTICAL_GEOMETRY_PARTIAL",
+    message: `Measured/verified ride elevation covers ${(rideVerticalCoverage * 100).toFixed(1)}% of mapped track length; remaining one-block centreline sections stay visibly 2D-only except explicitly tunnel-tagged gaps may use disclosed terrain-constrained inference when enabled.`
+  });
   const interpolatedRideSamples = (rideEvidenceCounts.interpolated || 0) + (rideEvidenceCounts["interpolated-lidar"] || 0);
   if (interpolatedRideSamples) gaps.push({ severity: "medium", code: "RIDE_PROFILE_INTERPOLATED", message: `${interpolatedRideSamples} ride-profile sample(s) are explicitly bounded interpolation rather than direct observations.` });
   if (rideEvidenceCounts.inferred) gaps.push({ severity: "high", code: "RIDE_PROFILE_INFERRED", message: `${rideEvidenceCounts.inferred} ride-profile sample(s) are inferred rather than measured or verified.` });

@@ -26,6 +26,7 @@
 - Interpolation is bounded between compatible ride anchors; no end extrapolation is performed.
 - Prepared planning handoff requires exact plan hash, shard coverage, unique document identities, frozen ordering and payload hash; generation performs zero planning downloads or extraction retries unless an expert explicitly enables the slow fallback.
 - Ride track output is exactly one block wide. Banking and cross ties are outside the representation.
+- Missing or partial ride elevation remains a reported high-severity limitation and keeps the build out of the exact-3D class, but it does not block source-faithful one-block plan centrelines. Explicit tunnel-height, profile-alignment and detected-attachment evidence gates still fail closed.
 - Supports and ride attachments retain detected planning geometry; no spacing, mirroring or side-offset prior creates missing features.
 - Every named polygonal building/structure accepted into the compiler receives a native Bedrock sign.
 - Independent OS NGD geometry cannot override planning geometry; Tree Species Map classes are used only above the configured confidence gate and never fabricate an unmapped tree.
