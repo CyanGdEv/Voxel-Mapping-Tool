@@ -85,7 +85,10 @@ function projectReconstructionToCompilerFeatures(graph) {
     };
     feature.vertical ||= {};
     if (Number.isFinite(node.vertical?.heightM)) feature.vertical.heightM = node.vertical.heightM;
-    if (Number.isFinite(node.vertical?.baseElevationM)) feature.vertical.elevationM = node.vertical.baseElevationM;
+    // A sampled terrain/base level is not an explicit object elevation. Keeping
+    // these fields separate prevents every 2D ride line from being promoted to
+    // a supposedly verified flat 3D track.
+    if (Number.isFinite(node.vertical?.baseElevationM)) feature.vertical.baseElevationM = node.vertical.baseElevationM;
     if (Number.isFinite(node.vertical?.groundElevationM)) feature.vertical.groundElevationM = node.vertical.groundElevationM;
 
     const building = node.buildingReconstruction;
@@ -93,7 +96,7 @@ function projectReconstructionToCompilerFeatures(graph) {
       feature.buildingReconstruction = building;
       if (building.status === "resolved" && Number.isFinite(building.heightM)) {
         feature.vertical.heightM = building.heightM;
-        feature.vertical.elevationM = building.baseElevationM;
+        feature.vertical.baseElevationM = building.baseElevationM;
         feature.vertical.explicit = true;
         feature.vertical.heightSource = String(building.authority?.top || "").includes("dsm")
           ? "phase34-dsm-minus-dtm"

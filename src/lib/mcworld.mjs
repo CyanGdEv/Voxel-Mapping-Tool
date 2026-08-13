@@ -20,6 +20,7 @@ import {
 } from "mcbe-leveldb";
 import { UserError, invariant } from "./errors.mjs";
 import { ensureDir, writeJson, writeText } from "./io.mjs";
+import { coverageChunkCount, validateWorldCoverage } from "./park-profile.mjs";
 
 const AIR = "minecraft:air";
 const WORLD_MIN_Y = -64;
@@ -107,7 +108,8 @@ export async function buildBedrockWorld({
     );
   }
 
-  const bounds = worldChunkBounds(compilation, worldMargin);
+  const coverageContract = options.parkProfile?.worldCoverage || null;
+  const bounds = resolveWorldChunkBounds(compilation, worldMargin, coverageContract);
   const chunkCount = (bounds.maxChunkX - bounds.minChunkX + 1) * (bounds.maxChunkZ - bounds.minChunkZ + 1);
   if (chunkCount > maxWorldChunks) {
     throw new UserError(
@@ -223,6 +225,13 @@ export async function buildBedrockWorld({
       generatorOutsidePrebuiltArea: "void",
       chunks: chunkCount,
       chunkBounds: bounds,
+      coverageContract: coverageContract ? {
+        status: "passed",
+        authority: coverageContract.authority || null,
+        expectedChunks: Number(coverageContract.expectedChunks),
+        expectedChunkBounds: coverageContract.chunkBounds,
+        expectedMarginBlocks: Number(coverageContract.marginBlocks)
+      } : null,
       baseY,
       marginBlocks: worldMargin,
       spawn,
@@ -261,6 +270,7 @@ export async function buildBedrockWorld({
         profileBlocks: compilation.meta.verticalStats?.rideProfileBlocks || 0,
         evidenceBlocks: compilation.meta.verticalStats?.rideProfileEvidenceBlocks || {},
         flatPlanBlocks: compilation.meta.verticalStats?.groundPlanRideTracks || 0,
+        explicitElevationSegments: compilation.meta.verticalStats?.verticallyTaggedRideTracks || 0,
         terrainMode: compilation.meta.verticalStats?.rideTerrainMode || "off",
         explicitTunnelFeatures: compilation.meta.verticalStats?.rideExplicitTunnelFeatures || 0,
         terrainDetectedTunnelFeatures: compilation.meta.verticalStats?.rideTerrainDetectedTunnelFeatures || 0,
@@ -306,6 +316,9 @@ export async function buildBedrockWorld({
           evidence: compilation.meta.universalFidelity?.trees || null,
           models: compilation.meta.verticalStats?.treeModels || 0,
           positionMarkers: compilation.meta.verticalStats?.treePositionMarkers || 0,
+          heightInferred: compilation.meta.verticalStats?.treeHeightInferred || 0,
+          inferredCrowns: compilation.meta.verticalStats?.treeCrownInferred || 0,
+          canopyMatchedModels: compilation.meta.verticalStats?.vegetationCanopyMatchedModels || 0,
           trunkBlocks: compilation.meta.verticalStats?.treeTrunkBlocks || 0,
           leafBlocks: compilation.meta.verticalStats?.treeLeafBlocks || 0
         },
@@ -851,16 +864,37 @@ async function collectFiles(directory, prefix, archive) {
   }
 }
 
-function worldChunkBounds(compilation, margin) {
+export function resolveWorldChunkBounds(compilation, margin, coverage = null) {
   const bounds = compilation.meta.bounds;
   const operationX = compilation.chunks.map((chunk) => chunk.x);
   const operationZ = compilation.chunks.map((chunk) => chunk.z);
-  return {
+  const derived = {
     minChunkX: Math.min(floorDiv(bounds.minX - margin, 16), ...operationX),
     minChunkZ: Math.min(floorDiv(bounds.minZ - margin, 16), ...operationZ),
     maxChunkX: Math.max(floorDiv(bounds.maxX + margin, 16), ...operationX),
     maxChunkZ: Math.max(floorDiv(bounds.maxZ + margin, 16), ...operationZ)
   };
+  if (!coverage) return derived;
+  validateWorldCoverage(coverage);
+  if (Number(margin) !== Number(coverage.marginBlocks)) {
+    throw new UserError(
+      `The park coverage contract requires a ${coverage.marginBlocks}-block world margin; received ${margin}`,
+      "Use the configured profile margin so the independently validated chunk roster remains stable."
+    );
+  }
+  const expected = Object.fromEntries(Object.entries(coverage.chunkBounds).map(([key, value]) => [key, Number(value)]));
+  const mismatch = Object.keys(expected).some((key) => derived[key] !== expected[key]);
+  if (mismatch || coverageChunkCount(coverage) !== Number(coverage.expectedChunks)) {
+    throw new UserError(
+      `Generated coverage ${formatChunkBounds(derived)} does not match the ${coverage.expectedChunks.toLocaleString()}-chunk park contract ${formatChunkBounds(expected)}`,
+      "Correct the planning registration or park boundary; the compiler will not publish a partial or expanded chunk roster."
+    );
+  }
+  return expected;
+}
+
+function formatChunkBounds(bounds) {
+  return `X ${bounds.minChunkX}..${bounds.maxChunkX}, Z ${bounds.minChunkZ}..${bounds.maxChunkZ}`;
 }
 
 function groupSignsByChunk(signs) {

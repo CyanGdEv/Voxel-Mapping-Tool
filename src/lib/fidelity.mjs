@@ -187,7 +187,9 @@ export function deriveSurfaceStyle(feature, options = {}) {
   const hasObservedAppearance = Boolean(material || colour || explicitPattern);
   const verified = (options.accuracyMode || "verified") === "verified";
   const fallback = verified
-    ? ["minecraft:orange_concrete", "minecraft:orange_concrete"]
+    ? feature.kind === "road"
+      ? ["minecraft:gray_concrete", "minecraft:black_concrete"]
+      : ["minecraft:gravel", "minecraft:andesite"]
     : feature.kind === "road"
       ? ["minecraft:gray_concrete", "minecraft:black_concrete"]
       : ["minecraft:gravel", "minecraft:andesite"];

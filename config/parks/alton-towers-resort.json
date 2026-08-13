@@ -27,6 +27,26 @@
       "http://publicaccess.staffsmoorlands.gov.uk/portal/servlets/ApplicationSearchServlet?PKID=127678"
     ]
   },
+  "worldCoverage": {
+    "schemaVersion": 1,
+    "authority": "validated Alton Towers park coverage contract",
+    "marginBlocks": 32,
+    "chunkBounds": {
+      "minChunkX": -48,
+      "minChunkZ": -49,
+      "maxChunkX": 47,
+      "maxChunkZ": 49
+    },
+    "expectedChunks": 9504,
+    "minimumPlanningSpanRatioX": 0.5,
+    "minimumPlanningSpanRatioZ": 0.5,
+    "maximumSemanticAnchorFanout": 64,
+    "minimumFeatureCounts": {
+      "building": 25,
+      "path": 25,
+      "ride_track": 5
+    }
+  },
   "defaults": {
     "elevation": "ea-lidar",
     "englandOpenData": true,

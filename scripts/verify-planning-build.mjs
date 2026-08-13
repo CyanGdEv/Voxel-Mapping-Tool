@@ -8,12 +8,14 @@ assert.ok(options.directory, "--directory is required");
 const directory = path.resolve(options.directory);
 
 const readJson = async (name) => JSON.parse(await readFile(path.join(directory, name), "utf8"));
-const [result, authority, planning, graph, labels] = await Promise.all([
+const [result, authority, planning, graph, labels, manifest, spatialContract] = await Promise.all([
   readJson("build-result.json"),
   readJson("source-authority.json"),
   readJson("planning-sources.json"),
   readJson("park-reconstruction-graph.json"),
-  readJson("building-labels.json")
+  readJson("building-labels.json"),
+  readJson("world-manifest.json"),
+  readJson("planning-spatial-contract.json")
 ]);
 const geojson = JSON.parse(await readFile(result.paths.geojson, "utf8"));
 
@@ -32,6 +34,51 @@ assert.ok(!geojson.features.some((feature) => String(feature.id).startsWith("osm
 assert.ok(!geojson.features.some((feature) => feature.properties?.planning_exclude_from_world === true),
   "planning-excluded construction geometry reached the world");
 assert.equal(result.stats.worldValidation, "passed", "internal Bedrock validation did not pass");
+assert.notEqual(spatialContract.status, "failed", `planning spatial contract failed: ${spatialContract.failures?.join("; ")}`);
+
+let profile = null;
+if (options.profile) {
+  profile = JSON.parse(await readFile(path.resolve(options.profile), "utf8"));
+  const coverage = profile.worldCoverage;
+  if (coverage) {
+    const bounds = coverage.chunkBounds;
+    const expectedChunks = (bounds.maxChunkX - bounds.minChunkX + 1) * (bounds.maxChunkZ - bounds.minChunkZ + 1);
+    assert.equal(expectedChunks, coverage.expectedChunks, "park profile world coverage rectangle is internally inconsistent");
+    assert.equal(result.stats.worldChunks, coverage.expectedChunks,
+      "generated chunk roster does not match the independent park profile contract");
+    assert.equal(manifest.chunks, coverage.expectedChunks,
+      "world manifest does not match the independent park profile contract");
+    assert.deepEqual(manifest.chunkBounds, bounds,
+      "world chunk bounds do not match the independent park profile contract");
+    assert.equal(manifest.marginBlocks, coverage.marginBlocks,
+      "world margin does not match the independent park profile contract");
+    assert.equal(spatialContract.status, "passed", "configured park requires a passing planning spatial contract");
+  }
+}
+
+const rideOutput = manifest.rideOutput || {};
+const rideFeatures = geojson.features.filter((feature) => feature.properties?.kind === "ride_track");
+if (rideFeatures.length) {
+  assert.ok((rideOutput.profileBlocks || 0) + (rideOutput.flatPlanBlocks || 0) > 0,
+    "accepted ride tracks produced no visible centreline blocks");
+}
+const explicitlyElevatedRideFeatures = rideFeatures.filter((feature) =>
+  feature.properties?._vertical?.explicit === true &&
+  Number.isFinite(feature.properties?._vertical?.elevationM)
+);
+if (!explicitlyElevatedRideFeatures.length) {
+  assert.equal(rideOutput.explicitElevationSegments || 0, 0,
+    "terrain/base elevation was incorrectly promoted to explicit ride elevation");
+}
+assert.ok(!rideFeatures.some((feature) =>
+  /\b(?:max(?:imum)?\s+dimensions?|envelope|limit of deviation|clearance)\b/i.test(
+    String(feature.properties?.planning_semantic_label || feature.properties?.name || "")
+  )), "ride envelope/dimension strokes were promoted as track centrelines");
+const treeOutput = manifest.fidelityOutput?.trees || {};
+assert.equal(treeOutput.heightInferred || 0, 0,
+  "verified build emitted trees with invented heights");
+assert.equal(treeOutput.inferredCrowns || 0, 0,
+  "verified build emitted procedural tree crowns without crown evidence");
 
 assert.ok(Array.isArray(labels.labels), "building label index is missing labels");
 assert.equal(labels.count, labels.labels.length, "building label count does not match label index");
@@ -74,6 +121,9 @@ const report = {
   osmWorldFeatures: 0,
   sourceNamedBuildings: sourceNamedBuildings.length,
   resolvedBuildingLabels: labels.count,
+  worldChunks: manifest.chunks,
+  expectedWorldChunks: profile?.worldCoverage?.expectedChunks || null,
+  planningSpatialContract: spatialContract.status,
   sourceNamedBuildingsWithoutResolvedLabel: Math.max(0, sourceNamedBuildings.length - labels.count),
   buildingLabelContract: "resolved-source-backed-subset",
   worldValidation: result.stats.worldValidation

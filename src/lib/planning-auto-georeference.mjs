@@ -23,6 +23,8 @@ const CORROBORATION_MARKER = "TPMAP_PLANNING_CORROBORATION_INPUT_V1";
 const OSM_RIDE_CORROBORATION_DISTANCE_M = 12;
 const OSM_RIDE_CORROBORATION_MIN_SAMPLES = 6;
 const OSM_RIDE_CORROBORATION_MIN_RATIO = 0.5;
+const MIN_RASTER_PLAN_SCALE_DENOMINATOR = 50;
+const DEFAULT_MAX_SEMANTIC_ANCHOR_FANOUT = 64;
 
 export function autoGeoreferencePlanningPage({
   svg,
@@ -49,6 +51,13 @@ export function autoGeoreferencePlanningPage({
   if (!scale || !location) {
     return emptyResult(!scale ? "drawing-scale-unavailable" : "application-location-unavailable", parsed, scale, location, { page, geometryView });
   }
+  if (scale.denominator < MIN_RASTER_PLAN_SCALE_DENOMINATOR) {
+    return emptyResult("drawing-scale-out-of-range", parsed, scale, location, { page, geometryView });
+  }
+  const hasExplicitNorth = Number.isFinite(Number(semantic.northDegrees));
+  if (!hasExplicitNorth) {
+    return emptyResult("drawing-orientation-unavailable", parsed, scale, location, { page, geometryView });
+  }
 
   const metresPerPixel = scale.denominator * 0.0254 / Number(document.dpi || DEFAULT_DPI);
   if (!(metresPerPixel > 0.002 && metresPerPixel < 10)) {
@@ -58,18 +67,34 @@ export function autoGeoreferencePlanningPage({
   const textBoxes = planningTextBoxes(rawLines);
   const candidateShapes = parsed.shapes.filter((shape) => !rasterShapeLooksLikeText(shape, textBoxes));
   const textShapesRejected = parsed.shapes.length - candidateShapes.length;
-  const associationRadius = Math.max(24, Math.min(parsed.width, parsed.height) * 0.05);
+  const associationRadius = Math.max(18, Math.min(parsed.width, parsed.height) * 0.02);
   const geometryAnchors = (semantic.anchors || []).filter((anchor) => isPlanningGeometryAnchor(anchor, parsed));
-  const associated = candidateShapes.map((shape) => ({
+  const allAssociated = candidateShapes.map((shape) => ({
     shape,
     association: associateComprehensivePlanningLabel(shape, geometryAnchors, associationRadius)
   })).filter((entry) => entry.association?.anchor?.semantic);
+  const maximumFanout = Number(profile?.worldCoverage?.maximumSemanticAnchorFanout || DEFAULT_MAX_SEMANTIC_ANCHOR_FANOUT);
+  const anchorFanout = new Map();
+  for (const entry of allAssociated) {
+    const anchor = entry.association.anchor;
+    anchorFanout.set(anchor, (anchorFanout.get(anchor) || 0) + 1);
+  }
+  const associated = allAssociated.filter((entry) => {
+    const label = String(entry.association.anchor.text || "");
+    return anchorFanout.get(entry.association.anchor) <= maximumFanout && !semanticDrawingEvidenceOnly(label);
+  });
+  const ambiguousAssociationsRejected = allAssociated.length - associated.length;
   const labelledBoundary = associated.find((entry) => entry.association.anchor.semantic.featureClass === "site-boundary");
   const redBoundaryShape = candidateShapes.filter((shape) => shape.closed && redStroke(shape.stroke))
     .sort((a, b) => approximateShapeArea(b) - approximateShapeArea(a))[0] || null;
   const siteBoundary = labelledBoundary?.shape || redBoundaryShape;
-  const origin = siteBoundary ? shapeCentroid(siteBoundary) : { x: parsed.width / 2, y: parsed.height / 2 };
-  const northDegrees = Number.isFinite(Number(semantic.northDegrees)) ? Number(semantic.northDegrees) : 0;
+  if (!siteBoundary) {
+    return emptyResult("drawing-registration-control-unavailable", parsed, scale, location, {
+      page, geometryView, ambiguousAssociationsRejected
+    });
+  }
+  const origin = shapeCentroid(siteBoundary);
+  const northDegrees = Number(semantic.northDegrees);
   const projector = createProjector({ lat: location.lat, lon: location.lon });
   const toLonLat = ({ x, y }) => {
     const east = (x - origin.x) * metresPerPixel;
@@ -82,7 +107,7 @@ export function autoGeoreferencePlanningPage({
 
   const locationConfidence = application.locationConfidence ?? location.confidence ?? (application.geometry ? 0.94 : 0.82);
   const originConfidence = siteBoundary ? 0.9 : 0.62;
-  const orientationConfidence = Number.isFinite(Number(semantic.northDegrees)) ? 0.92 : 0.72;
+  const orientationConfidence = 0.92;
   const baseConfidence = clamp(
     scale.confidence * 0.3 + locationConfidence * 0.25 + originConfidence * 0.25 + orientationConfidence * 0.2,
     0, 1
@@ -119,17 +144,18 @@ export function autoGeoreferencePlanningPage({
         planning_authoritative: true,
         planning_auto_extracted: true,
         planning_auto_georeferenced: true,
+        planning_spatial_registration_verified: true,
         planning_geometry_view: geometryView.status,
         planning_geometry_view_reason: geometryView.reason,
-        planning_georeference_method: siteBoundary
-          ? "drawing-scale-and-planning-site-boundary-to-application-location"
-          : "drawing-scale-and-page-centre-to-application-location",
+        planning_georeference_method: "drawing-scale-north-and-planning-site-boundary-to-application-location",
         planning_georeference_confidence: round(confidence),
         planning_page: page,
         planning_scale_denominator: scale.denominator,
         planning_metres_per_pixel: round(metresPerPixel, 6),
         planning_north_rotation_degrees: northDegrees,
+        planning_north_rotation_source: "drawing-north-evidence",
         planning_semantic_label: association.anchor.text,
+        planning_semantic_anchor_fanout: anchorFanout.get(association.anchor),
         accuracy_m: round(Math.max(0.5, (1 - confidence) * 25), 2),
         verified: confidence >= 0.82
       }
@@ -154,11 +180,14 @@ export function autoGeoreferencePlanningPage({
         planning_authoritative: true,
         planning_auto_extracted: true,
         planning_auto_georeferenced: true,
+        planning_spatial_registration_verified: true,
         planning_geometry_view: geometryView.status,
         planning_geometry_view_reason: geometryView.reason,
         planning_georeference_confidence: round(confidence),
         planning_page: page,
         planning_scale_denominator: scale.denominator,
+        planning_north_rotation_degrees: northDegrees,
+        planning_north_rotation_source: "drawing-north-evidence",
         planning_semantic_label: anchor.text,
         accuracy_m: round(Math.max(0.5, (1 - confidence) * 25), 2),
         verified: confidence >= 0.82
@@ -173,13 +202,14 @@ export function autoGeoreferencePlanningPage({
     location,
     metresPerPixel,
     geometryView,
-    origin: { ...origin, method: siteBoundary ? labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary" : "page-centre" },
+    origin: { ...origin, method: labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary" },
     northDegrees,
     confidence: round(baseConfidence),
     shapes: parsed.shapes.length,
     candidateShapes: candidateShapes.length,
     textShapesRejected,
     geometryShapesRejected,
+    ambiguousAssociationsRejected,
     associatedShapes: associated.length,
     collection: { type: "FeatureCollection", features }
   };
@@ -224,11 +254,11 @@ export function detectPlanningScales(value) {
   const results = [];
   const text = String(value || "");
   // UK planning title blocks commonly use 1/200 @ A1 as well as 1:200.
-  const pattern = /(?:scale\s*(?:at\s*)?|\b)(?:1\s*[:@/]\s*)(\d{2,5})(?:\b|\s*at\s*a[0-4])/gi;
+  const pattern = /(?:\bscale\s*(?:at\s*)?1\s*[:@/]\s*(\d{2,5})(?:\b|\s*at\s*a[0-4])|\b1\s*[:@/]\s*(\d{2,5})\s*(?:at\s*)?a[0-4]\b)/gi;
   let match;
   while ((match = pattern.exec(text))) {
-    const denominator = Number(match[1]);
-    if (denominator < 20 || denominator > 25_000) continue;
+    const denominator = Number(match[1] || match[2]);
+    if (denominator < MIN_RASTER_PLAN_SCALE_DENOMINATOR || denominator > 25_000) continue;
     results.push({ denominator, confidence: /scale/i.test(match[0]) ? 0.96 : 0.82, source: match[0].trim() });
   }
   return results;
@@ -271,7 +301,8 @@ export function corroborateAutomaticPlanningCollection(collection, application, 
   const dsmRatio = samples ? structureMatches / samples : 0;
   const dsmCorroborated = samples >= 3 && dsmRatio >= 0.45;
   const osmRide = corroborateRideAgainstOsm(collection, runtime);
-  const worldEligible = acceptedDecision && (explicitExisting || dsmCorroborated || osmRide.corroborated);
+  const registration = planningRegistrationSummary(collection);
+  const worldEligible = registration.verified && acceptedDecision && (explicitExisting || dsmCorroborated || osmRide.corroborated);
   return {
     worldEligible,
     basis: worldEligible
@@ -280,13 +311,28 @@ export function corroborateAutomaticPlanningCollection(collection, application, 
         : dsmCorroborated
           ? `The approved official drawing passed automatic georeferencing and ${structureMatches}/${samples} sampled structural locations are independently present in the public DSM.`
           : `The approved official planning-derived ride geometry is independently corroborated by ${osmRide.matches}/${osmRide.samples} registration-only OSM ride samples; OSM geometry is not promoted into the world.`
-      : acceptedDecision
+      : !registration.verified
+        ? `The drawing is evidence-only because ${registration.unverified}/${registration.features} extracted feature(s) lack an independently verifiable spatial registration.`
+        : acceptedDecision
         ? "Approved/proposed geometry was discovered but no automatic current-state/as-built, DSM, or registration-only OSM ride corroboration reached the promotion threshold."
         : "The official record is not an accepted/implemented decision.",
     acceptedDecision,
     explicitExisting,
+    registration,
     dsm: { available: Boolean(samplePairLocal), samples, structureMatches, ratio: round(dsmRatio) },
     osmRide
+  };
+}
+
+function planningRegistrationSummary(collection) {
+  const features = collection?.features || [];
+  const unverified = features.filter((feature) => feature.properties?.planning_spatial_registration_verified !== true).length;
+  return {
+    features: features.length,
+    verifiedFeatures: features.length - unverified,
+    unverified,
+    verified: features.length > 0 && unverified === 0,
+    policy: "application-point placement alone is insufficient; drawing north plus a site control, BNG, or mapped IFC conversion is required"
   };
 }
 
@@ -307,8 +353,13 @@ function applicationLocation(application, profile) {
 
 function bestScaleCandidate(candidates) {
   const normalized = candidates.filter((candidate) => Number.isFinite(Number(candidate?.denominator)))
-    .map((candidate) => ({ ...candidate, denominator: Number(candidate.denominator), confidence: Number(candidate.confidence || 0.7) }));
+    .map((candidate) => ({ ...candidate, denominator: Number(candidate.denominator), confidence: Number(candidate.confidence || 0.7) }))
+    .filter((candidate) => candidate.denominator >= MIN_RASTER_PLAN_SCALE_DENOMINATOR && candidate.denominator <= 25_000);
   return normalized.sort((a, b) => b.confidence - a.confidence || a.denominator - b.denominator)[0] || null;
+}
+
+function semanticDrawingEvidenceOnly(value) {
+  return /\b(?:max(?:imum)?\s+dimensions?|envelope|limit of deviation|clearance)\b/i.test(String(value || ""));
 }
 
 function shapeGeometry(shape, mapper) {

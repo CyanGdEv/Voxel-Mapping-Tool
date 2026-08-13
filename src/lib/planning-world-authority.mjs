@@ -1,5 +1,7 @@
 // TPMAP_PHASE30D_PLANNING_ONLY_WORLD_AUTHORITY
 
+import { coverageLocalBounds } from "./park-profile.mjs";
+
 const PLANNING_ONLY = "planning-only";
 const INDEPENDENT_WORLD_KINDS = new Set(["vegetation", "water", "terrain_detail"]);
 const POSTCODE = /\b(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
@@ -42,7 +44,7 @@ export function applyPlanningWorldAuthority(features, options = {}) {
     }
     discardInheritedOsmVerticalEvidence(feature);
     if (isPlanningWorldFeature(feature)) {
-      const spatialOutlier = automaticPlanningSpatialOutlier(feature);
+      const spatialOutlier = automaticPlanningSpatialOutlier(feature, options);
       if (spatialOutlier) {
         evidence.planningSpatialOutliersRemoved += 1;
         evidence.planningSpatialOutlierReasons[spatialOutlier] =
@@ -78,9 +80,10 @@ function excludedFromWorld(feature) {
   );
 }
 
-function automaticPlanningSpatialOutlier(feature) {
+function automaticPlanningSpatialOutlier(feature, options) {
   const tags = feature?.tags || {};
   if (tags.planning_auto_extracted !== true) return null;
+  if (tags.planning_spatial_registration_verified !== true) return "unverified-drawing-registration";
   const label = String(tags.planning_semantic_label || feature?.name || "").replace(/\s+/g, " ").trim();
   if (POSTCODE.test(label)) return "title-block-postcode-label";
   if (DRAWING_METADATA.test(label)) return "drawing-metadata-label";
@@ -90,35 +93,68 @@ function automaticPlanningSpatialOutlier(feature) {
 
   const bounds = boundsOf([feature.localGeometry]);
   if (!bounds) return "invalid-local-geometry";
+  const coverage = options.parkProfile?.worldCoverage;
+  if (coverage && !boundsInside(bounds, coverageLocalBounds(coverage))) return "outside-configured-park-coverage";
   const spanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ);
   if (["building", "structure"].includes(feature.kind) && spanM > 250) return "implausible-building-span";
+  if (feature.kind === "ride_track" && /\b(?:max(?:imum)?\s+dimensions?|envelope|limit of deviation|clearance)\b/i.test(label)) {
+    return "ride-envelope-not-track-centreline";
+  }
   return null;
 }
 
-export function planningWorldBoundary(features, parkName) {
+export function planningWorldBoundary(features, parkName, options = {}) {
   const planning = features.filter(isPlanningWorldFeature);
   if (!planning.length) {
     throw new Error("Planning-only world authority requires at least one accepted planning feature; refusing an OSM-backed world fallback");
   }
-  const geographic = boundsOf(planning.map((feature) => feature.geometry));
-  const local = boundsOf(planning.map((feature) => feature.localGeometry));
-  if (!geographic || !local) {
+  const planningGeographic = boundsOf(planning.map((feature) => feature.geometry));
+  const planningLocal = boundsOf(planning.map((feature) => feature.localGeometry));
+  if (!planningGeographic || !planningLocal) {
     throw new Error("Planning-only world authority could not derive a planning coverage boundary");
   }
+  const coverage = options.parkProfile?.worldCoverage || null;
+  const local = coverage ? coverageLocalBounds(coverage) : planningLocal;
+  const localGeometry = boundsPolygon(local, coverage ? 0 : 8);
+  const geometry = coverage && options.projector
+    ? mapGeometry(localGeometry, options.projector.inverse)
+    : boundsPolygon(planningGeographic, 0.0001);
   return {
-    id: "derived:planning-world-boundary",
+    id: coverage ? "profile:validated-world-coverage" : "derived:planning-world-boundary",
     name: parkName,
     kind: "park_boundary",
-    subtype: "planning-coverage-envelope",
-    geometry: boundsPolygon(geographic, 0.0001),
-    localGeometry: boundsPolygon(local, 8),
-    tags: { planning_boundary: "coverage-envelope", render_in_world: false },
+    subtype: coverage ? "validated-park-coverage" : "planning-coverage-envelope",
+    geometry,
+    localGeometry,
+    tags: {
+      planning_boundary: coverage ? "profile-world-coverage-contract" : "coverage-envelope",
+      expected_world_chunks: coverage?.expectedChunks || null,
+      render_in_world: false
+    },
     vertical: { heightM: null, elevationM: null, explicit: false },
-    source: { provider: "Accepted planning data", dataset: "planning-world-coverage" },
+    source: {
+      provider: coverage?.authority || "Accepted planning data",
+      dataset: coverage ? "park-profile-world-coverage-contract" : "planning-world-coverage"
+    },
     verification: { plan: "planning-source-of-truth", vertical: "not-applicable" },
     verified: true,
     fallback: false
   };
+}
+
+function boundsInside(inner, outer) {
+  return inner.minX >= outer.minX && inner.minZ >= outer.minZ &&
+    inner.maxX <= outer.maxX && inner.maxZ <= outer.maxZ;
+}
+
+function mapGeometry(geometry, mapper) {
+  const mapCoordinates = (value) => {
+    if (Array.isArray(value) && value.length >= 2 && Number.isFinite(value[0]) && Number.isFinite(value[1])) {
+      return mapper([value[0], value[1]]);
+    }
+    return Array.isArray(value) ? value.map(mapCoordinates) : value;
+  };
+  return { ...geometry, coordinates: mapCoordinates(geometry.coordinates) };
 }
 
 export function isPlanningWorldFeature(feature) {
