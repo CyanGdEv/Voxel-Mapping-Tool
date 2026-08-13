@@ -6,6 +6,14 @@ import {
   comprehensiveSemanticGeometryRole,
   comprehensiveSemanticTags
 } from "./planning-comprehensive-semantics.mjs";
+import {
+  classifyPlanningGeometryView,
+  isPlanningGeometryAnchor,
+  isPlanningPointAnchor,
+  planningShapeGeometryAllowed,
+  planningTextBoxes,
+  rasterShapeLooksLikeText
+} from "./planning-geometry-integrity.mjs";
 
 const DEFAULT_DPI = 300;
 const MAX_POLYGON_SHAPES = 12_000;
@@ -27,29 +35,37 @@ export function autoGeoreferencePlanningPage({
 }) {
   const parsed = parsePlanningSvg(svg);
   const rawLines = semantic.rawLines || [];
+  const geometryView = classifyPlanningGeometryView({ document, rawLines });
+  const location = applicationLocation(application, profile);
+  if (!geometryView.eligible) {
+    return emptyResult("drawing-view-evidence-only", parsed, null, location, { page, geometryView });
+  }
+
   const scale = bestScaleCandidate([
     ...(semantic.scaleCandidates || []),
     ...detectPlanningScales(rawLines.map((line) => line.text || line).join("\n")),
     ...detectPlanningScales(`${document.title || ""} ${document.description || ""}`)
   ]);
-  const location = applicationLocation(application, profile);
   if (!scale || !location) {
-    return emptyResult(!scale ? "drawing-scale-unavailable" : "application-location-unavailable", parsed, scale, location);
+    return emptyResult(!scale ? "drawing-scale-unavailable" : "application-location-unavailable", parsed, scale, location, { page, geometryView });
   }
 
   const metresPerPixel = scale.denominator * 0.0254 / Number(document.dpi || DEFAULT_DPI);
   if (!(metresPerPixel > 0.002 && metresPerPixel < 10)) {
-    return emptyResult("drawing-scale-out-of-range", parsed, scale, location);
+    return emptyResult("drawing-scale-out-of-range", parsed, scale, location, { page, geometryView });
   }
 
+  const textBoxes = planningTextBoxes(rawLines);
+  const candidateShapes = parsed.shapes.filter((shape) => !rasterShapeLooksLikeText(shape, textBoxes));
+  const textShapesRejected = parsed.shapes.length - candidateShapes.length;
   const associationRadius = Math.max(24, Math.min(parsed.width, parsed.height) * 0.05);
-  const geometryAnchors = (semantic.anchors || []).filter((anchor) => isLocalGeometryAnchor(anchor, parsed));
-  const associated = parsed.shapes.map((shape) => ({
+  const geometryAnchors = (semantic.anchors || []).filter((anchor) => isPlanningGeometryAnchor(anchor, parsed));
+  const associated = candidateShapes.map((shape) => ({
     shape,
     association: associateComprehensivePlanningLabel(shape, geometryAnchors, associationRadius)
   })).filter((entry) => entry.association?.anchor?.semantic);
   const labelledBoundary = associated.find((entry) => entry.association.anchor.semantic.featureClass === "site-boundary");
-  const redBoundaryShape = parsed.shapes.filter((shape) => shape.closed && redStroke(shape.stroke))
+  const redBoundaryShape = candidateShapes.filter((shape) => shape.closed && redStroke(shape.stroke))
     .sort((a, b) => approximateShapeArea(b) - approximateShapeArea(a))[0] || null;
   const siteBoundary = labelledBoundary?.shape || redBoundaryShape;
   const origin = siteBoundary ? shapeCentroid(siteBoundary) : { x: parsed.width / 2, y: parsed.height / 2 };
@@ -73,6 +89,7 @@ export function autoGeoreferencePlanningPage({
   );
 
   const features = [];
+  let geometryShapesRejected = 0;
   for (const { shape, association } of associated) {
     if (shape === redBoundaryShape && association.anchor.semantic.featureClass !== "site-boundary") continue;
     const semanticValue = association.anchor.semantic;
@@ -82,6 +99,10 @@ export function autoGeoreferencePlanningPage({
     if (semanticValue.className === "ride" && (semanticValue.featureClass !== "ride-track" || shape.closed)) continue;
     const role = comprehensiveSemanticGeometryRole(semanticValue, shape.closed, shape);
     if (!role || role.excluded || role.evidenceOnly) continue;
+    if (!planningShapeGeometryAllowed(shape, semanticValue, metresPerPixel)) {
+      geometryShapesRejected += 1;
+      continue;
+    }
     const confidence = clamp(baseConfidence * (0.72 + 0.28 * Number(association.anchor.ocrConfidence || 0.65)), 0, 1);
     if (confidence < minimumConfidence) continue;
     const geometry = shapeGeometry(shape, toLonLat);
@@ -98,6 +119,8 @@ export function autoGeoreferencePlanningPage({
         planning_authoritative: true,
         planning_auto_extracted: true,
         planning_auto_georeferenced: true,
+        planning_geometry_view: geometryView.status,
+        planning_geometry_view_reason: geometryView.reason,
         planning_georeference_method: siteBoundary
           ? "drawing-scale-and-planning-site-boundary-to-application-location"
           : "drawing-scale-and-page-centre-to-application-location",
@@ -114,6 +137,7 @@ export function autoGeoreferencePlanningPage({
   }
 
   for (const anchor of semantic.anchors || []) {
+    if (!isPlanningPointAnchor(anchor, parsed)) continue;
     const pointRole = comprehensivePointRole(anchor.semantic);
     if (!pointRole) continue;
     const confidence = clamp(baseConfidence * Number(anchor.ocrConfidence || 0.65), 0, 1);
@@ -130,6 +154,8 @@ export function autoGeoreferencePlanningPage({
         planning_authoritative: true,
         planning_auto_extracted: true,
         planning_auto_georeferenced: true,
+        planning_geometry_view: geometryView.status,
+        planning_geometry_view_reason: geometryView.reason,
         planning_georeference_confidence: round(confidence),
         planning_page: page,
         planning_scale_denominator: scale.denominator,
@@ -146,10 +172,14 @@ export function autoGeoreferencePlanningPage({
     scale,
     location,
     metresPerPixel,
+    geometryView,
     origin: { ...origin, method: siteBoundary ? labelledBoundary ? "labelled-planning-site-boundary" : "red-line-boundary" : "page-centre" },
     northDegrees,
     confidence: round(baseConfidence),
     shapes: parsed.shapes.length,
+    candidateShapes: candidateShapes.length,
+    textShapesRejected,
+    geometryShapesRejected,
     associatedShapes: associated.length,
     collection: { type: "FeatureCollection", features }
   };
@@ -371,18 +401,6 @@ function sampleGeometry(geometry, maxSamples) {
   return samples.slice(0, maxSamples);
 }
 
-function isLocalGeometryAnchor(anchor, parsed) {
-  const semantic = anchor?.semantic;
-  if (!semantic) return false;
-  if (semantic.featureClass === "ride-elevation") return false;
-  if (semantic.featureClass !== "ride-track") return true;
-  const text = String(anchor.text || "").toLowerCase();
-  if (/\b(?:legend|key)\b|\bindicated\s+(?:thus|as)\b/.test(text)) return false;
-  const inTitleMargin = Number(anchor.cx) > parsed.width * 0.78 || Number(anchor.cy) > parsed.height * 0.88;
-  const explicitGeometryLabel = /\b(?:track|alignment|running rail|ride footprint|ride layout|attraction layout)\b/.test(text);
-  return !(inTitleMargin && !explicitGeometryLabel);
-}
-
 function corroborateRideAgainstOsm(collection, runtime) {
   const lines = osmRideLines(runtime?.osm?.data || runtime?.osm);
   if (!lines.length) {
@@ -453,11 +471,12 @@ function autoId(application, document, page, index) {
   return `auto-plan:${safe(application.reference)}:${safe(document.id || document.title)}:p${page}:${index}`;
 }
 
-function emptyResult(status, parsed, scale, location) {
+function emptyResult(status, parsed, scale, location, extra = {}) {
   return {
     status, scale: scale || null, location: location || null, confidence: 0,
     shapes: parsed.shapes.length, associatedShapes: 0,
-    collection: { type: "FeatureCollection", features: [] }
+    collection: { type: "FeatureCollection", features: [] },
+    ...extra
   };
 }
 
