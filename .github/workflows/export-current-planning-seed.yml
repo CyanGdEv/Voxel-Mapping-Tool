@@ -26,11 +26,11 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     steps:
-      - name: Checkout current Voxel Mapper
+      - name: Checkout current Voxel Mapper repair branch
         uses: actions/checkout@v6
         with:
           repository: CyanGdEv/Voxel-Mapper
-          ref: main
+          ref: fix/persistent-planning-seed
           path: mapper
           persist-credentials: false
 
@@ -106,7 +106,7 @@ jobs:
                 documentId: evidence.id ?? entry.identity,
                 applicationReference: evidence.applicationReference ?? null,
                 applicationStatus: evidence.applicationStatus ?? null,
-                applicationDecision: evidence.applicationDecision ?? null,
+                applicationDecision: evidence.applicationDecision ?? (entry.corroboration?.acceptedDecision === true ? 'granted' : null),
                 applicationDecisionDate: evidence.applicationDecisionDate ?? null,
                 applicationProposal: evidence.applicationProposal ?? null,
                 title: evidence.title ?? null,
@@ -122,7 +122,7 @@ jobs:
           }
           if (missing.length) console.warn(`legacy shard ${shard}: ${missing.length} metadata documents were not present in the raw artifact`);
           const manifest = {
-            schema: 'voxel-mapper.download-planning-shard.v1',
+            schema: 'voxel-mapper.planning-download-shard.v2',
             shard,
             shardCount: 20,
             assigned: results.length,
@@ -168,6 +168,7 @@ jobs:
           set -euo pipefail
           mkdir -p out/seed
           node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
           import { readdir, readFile, writeFile } from 'node:fs/promises';
           import path from 'node:path';
 
@@ -183,7 +184,10 @@ jobs:
           const files = await walk('seed-shards');
           const geoFiles = files.filter((p) => p.endsWith('planning-evidence.geojson')).sort();
           const inventoryFiles = files.filter((p) => p.endsWith('extraction-inventory.json')).sort();
-          if (geoFiles.length !== 20) throw new Error(`expected 20 planning seed GeoJSON shards, got ${geoFiles.length}`);
+          const sourceManifestFiles = files.filter((p) => p.endsWith('legacy-download-shard.json')).sort();
+          if (geoFiles.length !== 20 || inventoryFiles.length !== 20 || sourceManifestFiles.length !== 20) {
+            throw new Error(`expected 20 complete planning seed shards, got geo=${geoFiles.length} inventory=${inventoryFiles.length} source=${sourceManifestFiles.length}`);
+          }
 
           const features = [];
           for (const file of geoFiles) {
@@ -191,12 +195,22 @@ jobs:
             features.push(...(collection.features ?? []));
           }
           const inventories = [];
-          let documentCount = 0, failureCount = 0;
+          let documentCount = 0, failureCount = 0, extractedFeatures = 0, droppedContextOnly = 0;
           for (const file of inventoryFiles) {
             const inventory = JSON.parse(await readFile(file, 'utf8'));
             inventories.push(inventory);
             documentCount += (inventory.documents ?? []).length;
             failureCount += (inventory.failures ?? []).length;
+            extractedFeatures += Number(inventory.extractedFeatures ?? 0);
+            droppedContextOnly += Number(inventory.dropped?.contextOnly ?? 0);
+          }
+          const applicationReferences = new Set();
+          for (const file of sourceManifestFiles) {
+            const source = JSON.parse(await readFile(file, 'utf8'));
+            for (const result of source.results ?? []) {
+              const reference = result.document?.applicationReference;
+              if (reference) applicationReferences.add(String(reference));
+            }
           }
           const collection = {
             type: 'FeatureCollection',
@@ -209,10 +223,14 @@ jobs:
               documentCount,
               failureCount,
               featureCount: features.length,
+              extractedFeatures,
+              droppedContextOnly,
               worldEligible: false,
               registrationRequired: true
             }
           };
+          const evidenceBytes = Buffer.from(JSON.stringify(collection) + '\n');
+          const evidenceSha256 = createHash('sha256').update(evidenceBytes).digest('hex');
           const manifest = {
             schema: 'voxel-mapper.planning-seed-manifest.v1',
             parkId: 'alton-towers-resort',
@@ -221,12 +239,16 @@ jobs:
             documentCount,
             failureCount,
             featureCount: features.length,
-            generatedWith: 'CyanGdEv/Voxel-Mapper@main',
-            inventories
+            extractedFeatures,
+            droppedContextOnly,
+            evidenceSha256,
+            applicationReferences: [...applicationReferences].sort(),
+            generatedWith: 'CyanGdEv/Voxel-Mapper@fix/persistent-planning-seed'
           };
-          await writeFile('out/seed/planning-evidence-unregistered.geojson', JSON.stringify(collection) + '\n');
+          if (features.length === 0) throw new Error('current planning seed contains zero retained reconstruction features');
+          await writeFile('out/seed/planning-evidence-unregistered.geojson', evidenceBytes);
           await writeFile('out/seed/seed-manifest.json', JSON.stringify(manifest, null, 2) + '\n');
-          console.log(`seed documents=${documentCount} features=${features.length} failures=${failureCount}`);
+          console.log(`seed documents=${documentCount} features=${features.length} failures=${failureCount} applicationRefs=${applicationReferences.size} sha256=${evidenceSha256}`);
           NODE
 
       - uses: actions/upload-artifact@v7
