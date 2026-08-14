@@ -1,0 +1,52 @@
+name: Publish Alton planning seed
+
+on:
+  push:
+    branches: [automation/publish-alton-planning-seed]
+    paths:
+      - .github/workflows/publish-alton-planning-seed.yml
+      - tools/publish-alton-planning-seed.mjs
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: automation/publish-alton-planning-seed
+
+      - name: Download current-format recovered corpus
+        uses: actions/download-artifact@v8
+        with:
+          name: current-alton-planning-seed-31829266717
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: '31829266717'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Build deterministic compact seed
+        run: node tools/publish-alton-planning-seed.mjs source/planning-evidence-unregistered.geojson planning-seeds/alton-towers-resort
+
+      - name: Commit immutable planning seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add planning-seeds/alton-towers-resort
+          if git diff --cached --quiet; then
+            echo 'Seed already published.'
+            exit 0
+          fi
+          git commit -m 'Publish verified Alton planning seed'
+          git push origin HEAD:automation/publish-alton-planning-seed
