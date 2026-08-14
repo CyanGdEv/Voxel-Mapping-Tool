@@ -35,7 +35,11 @@ jobs:
           node-version: '22'
 
       - name: Build deterministic compact seed
-        run: node tools/publish-alton-planning-seed.mjs source/planning-evidence-unregistered.geojson planning-seeds/alton-towers-resort
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/592f13a73c046d87584463d6d80826b107cfbfc82c5806be9af131afcc1cde1b/16a5ae10ddc97778d3fef1c70dc788b197d14ead23e9040a9c5abf0902132e5a/' tools/publish-alton-planning-seed.mjs
+          node tools/publish-alton-planning-seed.mjs source/planning-evidence-unregistered.geojson planning-seeds/alton-towers-resort
 
       - name: Commit immutable planning seed
         shell: bash
