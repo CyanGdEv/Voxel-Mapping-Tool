@@ -1,0 +1,36 @@
+{
+  "schema": "voxel-mapper.planning-seed-manifest.v1",
+  "format": "voxel-mapper.planning-seed-compact.v1",
+  "encoding": "brotli-base64",
+  "parkId": "alton-towers-resort",
+  "sourceRepository": "CyanGdEv/Voxel-Mapping-Tool",
+  "sourceRunId": 31740816954,
+  "sourceMigrationRunId": 31829266717,
+  "documentCount": 49,
+  "featureCount": 22494,
+  "evidenceSha256": "16a5ae10ddc97778d3fef1c70dc788b197d14ead23e9040a9c5abf0902132e5a",
+  "coordinateQuantizationMetres": 0.01,
+  "applicationReferences": [
+    "SMD/2011/1051",
+    "SMD/2014/0107",
+    "SMD/2015/0473",
+    "SMD/2016/0040",
+    "SMD/2017/0111",
+    "SMD/2020/0553",
+    "SMD/2022/0556"
+  ],
+  "kindCounts": {
+    "water": 3551,
+    "building": 2565,
+    "terrain_cut": 970,
+    "barrier": 4207,
+    "tree": 2652,
+    "road": 1980,
+    "path": 1074,
+    "ride_track": 3968,
+    "terrain_detail": 1186,
+    "structure": 34,
+    "ride_attachment": 307
+  },
+  "filterPolicy": "current-registration-compatible PDF plan geometry only; verified metric scale; exact recovered document allowlist; duplicate geometry collapsed by source document SHA + kind + 1 cm geometry signature"
+}
