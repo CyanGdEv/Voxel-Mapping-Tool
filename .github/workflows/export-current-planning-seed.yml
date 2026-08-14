@@ -1,0 +1,238 @@
+name: Export current planning seed
+
+on:
+  push:
+    branches: [automation/export-current-planning-seed]
+    paths: [.github/workflows/export-current-planning-seed.yml]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN_ID: '31740816954'
+  NODE_VERSION: '22'
+  OPENCV_PYTHON_VERSION: '4.12.0.88'
+
+jobs:
+  extract:
+    name: Re-extract legacy planning ${{ matrix.shard }}/19
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - name: Checkout current Voxel Mapper
+        uses: actions/checkout@v6
+        with:
+          repository: CyanGdEv/Voxel-Mapper
+          ref: main
+          path: mapper
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install mapper dependencies
+        working-directory: mapper
+        run: npm install --no-audit --no-fund
+
+      - name: Install PDF extraction tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          timeout 120s sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          timeout 180s sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends poppler-utils
+          python3 -m pip install --user --disable-pip-version-check "opencv-python-headless==${OPENCV_PYTHON_VERSION}"
+
+      - name: Download legacy planning metadata shard
+        uses: actions/download-artifact@v8
+        with:
+          name: planning-result-${{ env.SOURCE_RUN_ID }}-1-${{ matrix.shard }}
+          path: legacy-meta
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Download legacy raw planning documents shard
+        uses: actions/download-artifact@v8
+        with:
+          name: planning-documents-${{ env.SOURCE_RUN_ID }}-1-${{ matrix.shard }}
+          path: legacy-docs
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Build current mapper extraction manifest
+        env:
+          SHARD: ${{ matrix.shard }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          node --input-type=module <<'NODE'
+          import { readdir, readFile, writeFile } from 'node:fs/promises';
+          import { createHash } from 'node:crypto';
+          import path from 'node:path';
+
+          const shard = Number(process.env.SHARD);
+          const legacy = JSON.parse(await readFile(`legacy-meta/shard-${shard}.json`, 'utf8'));
+          const files = (await readdir('legacy-docs')).filter((name) => name.toLowerCase().endsWith('.pdf')).sort();
+          const byDigest = new Map();
+          for (const name of files) {
+            const bytes = await readFile(path.join('legacy-docs', name));
+            byDigest.set(createHash('sha256').update(bytes).digest('hex'), path.resolve('legacy-docs', name));
+          }
+
+          const results = [];
+          const missing = [];
+          for (const entry of legacy.entries ?? []) {
+            const evidence = entry.evidence ?? {};
+            if (!evidence.acquired || !evidence.sha256) continue;
+            const cacheFile = byDigest.get(String(evidence.sha256).toLowerCase());
+            if (!cacheFile) {
+              missing.push({ documentId: evidence.id ?? entry.identity, sha256: evidence.sha256 });
+              continue;
+            }
+            results.push({
+              status: 'acquired',
+              document: {
+                documentId: evidence.id ?? entry.identity,
+                applicationReference: evidence.applicationReference ?? null,
+                applicationStatus: evidence.applicationStatus ?? null,
+                applicationDecision: evidence.applicationDecision ?? null,
+                applicationDecisionDate: evidence.applicationDecisionDate ?? null,
+                applicationProposal: evidence.applicationProposal ?? null,
+                title: evidence.title ?? null,
+                role: evidence.role ?? 'planning-document',
+                url: evidence.sourceUrl ?? null,
+                sourceUrl: evidence.sourceUrl ?? null,
+                authority: evidence.authority ?? evidence.retrievalProvider ?? null,
+                sha256: evidence.sha256,
+                cacheFile,
+                contentFile: path.basename(cacheFile)
+              }
+            });
+          }
+          if (missing.length) console.warn(`legacy shard ${shard}: ${missing.length} metadata documents were not present in the raw artifact`);
+          const manifest = {
+            schema: 'voxel-mapper.download-planning-shard.v1',
+            shard,
+            shardCount: 20,
+            assigned: results.length,
+            results,
+            legacySourceRun: Number(process.env.SOURCE_RUN_ID),
+            missing
+          };
+          await writeFile('out/download-shard.json', JSON.stringify(manifest, null, 2) + '\n');
+          console.log(`legacy shard ${shard}: prepared ${results.length} current-extractor document(s)`);
+          NODE
+
+      - name: Extract with current Voxel Mapper
+        env:
+          VOXEL_MAPPER_STRICT_EXTRACTION: '0'
+          VOXEL_MAPPER_MAX_PLANNING_PAGES: '20'
+        run: node mapper/src/commands/extract-planning-shard.mjs out/download-shard.json out/extraction
+
+      - name: Preserve source manifest
+        run: cp out/download-shard.json out/extraction/legacy-download-shard.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: current-planning-seed-shard-${{ github.run_id }}-${{ matrix.shard }}
+          path: out/extraction
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
+
+  merge:
+    name: Merge current planning seed
+    needs: extract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: current-planning-seed-shard-${{ github.run_id }}-*
+          path: seed-shards
+
+      - name: Merge extracted current-format planning evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/seed
+          node --input-type=module <<'NODE'
+          import { readdir, readFile, writeFile } from 'node:fs/promises';
+          import path from 'node:path';
+
+          async function walk(dir) {
+            const out = [];
+            for (const item of await readdir(dir, { withFileTypes: true })) {
+              const p = path.join(dir, item.name);
+              if (item.isDirectory()) out.push(...await walk(p));
+              else out.push(p);
+            }
+            return out;
+          }
+          const files = await walk('seed-shards');
+          const geoFiles = files.filter((p) => p.endsWith('planning-evidence.geojson')).sort();
+          const inventoryFiles = files.filter((p) => p.endsWith('extraction-inventory.json')).sort();
+          if (geoFiles.length !== 20) throw new Error(`expected 20 planning seed GeoJSON shards, got ${geoFiles.length}`);
+
+          const features = [];
+          for (const file of geoFiles) {
+            const collection = JSON.parse(await readFile(file, 'utf8'));
+            features.push(...(collection.features ?? []));
+          }
+          const inventories = [];
+          let documentCount = 0, failureCount = 0;
+          for (const file of inventoryFiles) {
+            const inventory = JSON.parse(await readFile(file, 'utf8'));
+            inventories.push(inventory);
+            documentCount += (inventory.documents ?? []).length;
+            failureCount += (inventory.failures ?? []).length;
+          }
+          const collection = {
+            type: 'FeatureCollection',
+            features,
+            metadata: {
+              schema: 'voxel-mapper.planning-seed.v1',
+              parkId: 'alton-towers-resort',
+              sourceRepository: 'CyanGdEv/Voxel-Mapping-Tool',
+              sourceRunId: Number(process.env.SOURCE_RUN_ID),
+              documentCount,
+              failureCount,
+              featureCount: features.length,
+              worldEligible: false,
+              registrationRequired: true
+            }
+          };
+          const manifest = {
+            schema: 'voxel-mapper.planning-seed-manifest.v1',
+            parkId: 'alton-towers-resort',
+            sourceRepository: 'CyanGdEv/Voxel-Mapping-Tool',
+            sourceRunId: Number(process.env.SOURCE_RUN_ID),
+            documentCount,
+            failureCount,
+            featureCount: features.length,
+            generatedWith: 'CyanGdEv/Voxel-Mapper@main',
+            inventories
+          };
+          await writeFile('out/seed/planning-evidence-unregistered.geojson', JSON.stringify(collection) + '\n');
+          await writeFile('out/seed/seed-manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          console.log(`seed documents=${documentCount} features=${features.length} failures=${failureCount}`);
+          NODE
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: current-alton-planning-seed-${{ github.run_id }}
+          path: out/seed
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 7
