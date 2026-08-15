@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { copyFile, readFile, readdir, rm } from "node:fs/promises";
 import { cachedBinary, cachedJson, ensureDir, exists, fetchBinary, fetchJson, readJson, sha256, sha256File, writeJson } from "./io.mjs";
 import { extractRasterPlanningPage } from "./planning-raster-extraction.mjs";
+import { registerPlanningCollectionToOsm } from "./planning-osm-registration.mjs";
 import { extractNativeDxfPlanning, looksLikeAsciiDxf } from "./planning-native-vector.mjs";
 import { extractNativePlanningArchive } from "./planning-native-archive.mjs";
 import {
@@ -966,10 +967,18 @@ function recordPreparationRetries(evidence, retries) {
 function finalizePlanningDocument(processed, application, document, runtime, preparedCorroboration = null) {
   const { evidence, candidateCollection, warnings } = processed;
   if (!candidateCollection) return processed;
-  const features = candidateCollection.features || [];
+  const registered = registerPlanningCollectionToOsm(candidateCollection, {
+    application,
+    document,
+    runtime,
+    profile: runtime.parkProfile
+  });
+  const eligibleCollection = registered.collection;
+  const features = eligibleCollection.features || [];
+  evidence.osmRegistration = registered.registration;
   const input = planningCorroborationInput(application, document);
   const eligibility = corroborateAutomaticPlanningCollection(
-    candidateCollection, input, runtime, preparedCorroboration
+    eligibleCollection, input, runtime, preparedCorroboration
   );
   evidence.worldEligible = eligibility.worldEligible && features.length > 0;
   evidence.worldEligibilityBasis = eligibility.basis;
@@ -978,7 +987,7 @@ function finalizePlanningDocument(processed, application, document, runtime, pre
   if (features.length && !evidence.worldEligible) warnings.push(
     `${application.reference || "unknown"} ${document.title}: extracted geometry stayed evidence-only because current-state corroboration did not pass.`
   );
-  return { ...processed, collection: evidence.worldEligible ? candidateCollection : null };
+  return { ...processed, candidateCollection: eligibleCollection, collection: evidence.worldEligible ? eligibleCollection : null };
 }
 
 function planningCorroborationInput(application, document) {
